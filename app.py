@@ -22,23 +22,23 @@ st.set_page_config(
 )
 
 # -------------------
-# LIVE PRICE FETCHERS
+# LIVE PRICE FETCHERS (BINANCE)
 # -------------------
 @st.cache_data(ttl=10)
 def get_btc_price():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-        r = requests.get(url, timeout=10)
-        return r.json().get("bitcoin", {}).get("usd", None)
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        r = requests.get(url, timeout=10).json()
+        return float(r["price"])
     except:
         return None
 
 @st.cache_data(ttl=10)
 def get_eth_price():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
-        r = requests.get(url, timeout=10)
-        return r.json().get("ethereum", {}).get("usd", None)
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
+        r = requests.get(url, timeout=10).json()
+        return float(r["price"])
     except:
         return None
 
@@ -159,21 +159,12 @@ auto_refresh = st.sidebar.checkbox("Auto-refresh", value=True)
 show_charts = st.sidebar.checkbox("Show simple charts", value=True)
 download_raw = st.sidebar.checkbox("Show download buttons", value=True)
 
-# -------------------
-# LIVE PRICES SHOWN HERE
-# -------------------
+# LIVE PRICES
 btc_price = get_btc_price()
 eth_price = get_eth_price()
 
-if btc_price:
-    st.sidebar.metric("BTC Price (USD)", f"${btc_price:,.2f}")
-else:
-    st.sidebar.metric("BTC Price (USD)", "Error")
-
-if eth_price:
-    st.sidebar.metric("ETH Price (USD)", f"${eth_price:,.2f}")
-else:
-    st.sidebar.metric("ETH Price (USD)", "Error")
+st.sidebar.metric("BTC Price (USDT)", f"${btc_price:,.2f}" if btc_price else "Error")
+st.sidebar.metric("ETH Price (USDT)", f"${eth_price:,.2f}" if eth_price else "Error")
 
 # Auto-refresh
 if auto_refresh:
@@ -193,19 +184,27 @@ if df_chain.empty:
     st.warning("No data returned.")
 else:
     # ---------------------------------------------------
-    # HIGHLIGHT ROWS BETWEEN WHICH CURRENT PRICE FALLS
+    # SAFE HIGHLIGHT LOGIC USING BINANCE PRICE
     # ---------------------------------------------------
     current_price = btc_price if selected_underlying == "BTC" else eth_price
     df_display = df_chain.copy()
 
     df_display["strike_price"] = pd.to_numeric(df_display["strike_price"], errors="coerce")
 
-    # find nearest strikes
     strikes = df_display["strike_price"].dropna().unique()
     strikes_sorted = sorted(strikes)
 
-    lower = max([s for s in strikes_sorted if s <= current_price], default=None)
-    upper = min([s for s in strikes_sorted if s >= current_price], default=None)
+    lower = None
+    upper = None
+
+    if current_price is not None:
+        lowers = [s for s in strikes_sorted if s <= current_price]
+        uppers = [s for s in strikes_sorted if s >= current_price]
+
+        if lowers:
+            lower = max(lowers)
+        if uppers:
+            upper = min(uppers)
 
     def highlight_row(row):
         if row["strike_price"] == lower or row["strike_price"] == upper:
@@ -237,4 +236,4 @@ else:
         st.line_chart(chart_df.set_index("strike_price")[["call_oi", "put_oi"]])
 
 st.markdown("---")
-st.caption("Data via delta.exchange + Coingecko APIs.")
+st.caption("Data via Delta Exchange + Binance APIs.")
