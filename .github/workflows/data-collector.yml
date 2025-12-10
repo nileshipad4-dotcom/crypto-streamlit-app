@@ -3,7 +3,7 @@ name: Collect Option Chain Data
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # Run every 5 minutes
+    - cron: "*/1 * * * *"   # Run every 5 minutes
   workflow_dispatch:        # Allow manual run from Actions tab
 
 jobs:
