@@ -2,46 +2,73 @@ name: Collect Option Chain Data
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # Run every 10 minutes
-  workflow_dispatch:          # Allow manual triggering
+    - cron: "*/5 * * * *"    # Runs every 10 minutes
+  workflow_dispatch:           # Allows manual execution
 
 permissions:
-  contents: write             # Required for GitHub Actions to push
+  contents: write              # REQUIRED so actions can push files
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
+
+      # -----------------------------
+      # 1. CHECKOUT REPO
+      # -----------------------------
       - name: Checkout repo
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0     # IMPORTANT: allows pull --rebase to work
+          fetch-depth: 0       # full history required for reset
 
-      - name: Set up Python
+      # -----------------------------
+      # 2. SETUP PYTHON
+      # -----------------------------
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
+      # -----------------------------
+      # 3. INSTALL LIBRARIES
+      # -----------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas requests
 
-      - name: Run collector script
+      # -----------------------------
+      # 4. RUN COLLECTOR SCRIPT
+      # -----------------------------
+      - name: Run collector
         run: python collector.py
 
+      # -----------------------------
+      # 5. COMMIT + PUSH UPDATED CSV
+      #    (Force push to avoid merge conflicts)
+      # -----------------------------
       - name: Commit & Push updated data
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Configure bot identity
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Stage any new data
           git add data/*
-          git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes to commit"
+          git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes"
 
-          # FIX: Prevent push failures when repo is updated
-          git pull --rebase
+          # Fetch latest remote branch
+          git fetch origin main
 
-          git push
+          # Reset local branch to match remote (avoid conflicts)
+          git reset --hard origin/main
+
+          # Re-apply changes after reset
+          git add data/*
+          git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes"
+
+          # Force push to overwrite remote CSV (SAFE for data logs)
+          git push --force
