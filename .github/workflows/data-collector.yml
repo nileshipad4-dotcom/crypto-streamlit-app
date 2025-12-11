@@ -2,20 +2,21 @@ name: Collect Option Chain Data
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 10 minutes
-  workflow_dispatch:
+    - cron: "*/10 * * * *"   # Run every 10 minutes
+  workflow_dispatch:          # Allow manual triggering
 
 permissions:
-  contents: write
+  contents: write             # Required for GitHub Actions to push
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0     # IMPORTANT: allows pull --rebase to work
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -36,6 +37,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add data/*
           git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes to commit"
+
+          # FIX: Prevent push failures when repo is updated
+          git pull --rebase
+
           git push
