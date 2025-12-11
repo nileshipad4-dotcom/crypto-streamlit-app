@@ -22,23 +22,29 @@ st.set_page_config(
 )
 
 # -------------------
-# LIVE PRICE FETCHERS (BINANCE)
+# LIVE PRICE FROM DELTA EXCHANGE
 # -------------------
 @st.cache_data(ttl=10)
-def get_btc_price():
+def get_delta_price(symbol):
+    """
+    Fetch asset index price from Delta Exchange tickers API.
+    symbol = BTC or ETH
+    """
     try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        url = "https://api.india.delta.exchange/v2/tickers"
         r = requests.get(url, timeout=10).json()
-        return float(r["price"])
-    except:
-        return None
+        results = r.get("result", [])
 
-@st.cache_data(ttl=10)
-def get_eth_price():
-    try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
-        r = requests.get(url, timeout=10).json()
-        return float(r["price"])
+        if symbol == "BTC":
+            ticker = next((x for x in results if x.get("symbol") == "BTCUSD"), None)
+        elif symbol == "ETH":
+            ticker = next((x for x in results if x.get("symbol") == "ETHUSD"), None)
+        else:
+            return None
+
+        if ticker and "mark_price" in ticker:
+            return float(ticker["mark_price"])
+        return None
     except:
         return None
 
@@ -48,12 +54,12 @@ def get_eth_price():
 # -------------------
 @st.cache_data(ttl=60)
 def fetch_tickers(underlying: str, expiry: str) -> pd.DataFrame:
-    params = {
-        "contract_types": "call_options,put_options",
-        "underlying_asset_symbols": underlying,
-        "expiry_date": expiry
-    }
-    url = f"{API_BASE}?contract_types={params['contract_types']}&underlying_asset_symbols={params['underlying_asset_symbols']}&expiry_date={params['expiry_date']}"
+    url = (
+        f"{API_BASE}"
+        f"?contract_types=call_options,put_options"
+        f"&underlying_asset_symbols={underlying}"
+        f"&expiry_date={expiry}"
+    )
 
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
@@ -62,13 +68,16 @@ def fetch_tickers(underlying: str, expiry: str) -> pd.DataFrame:
         return pd.DataFrame()
     return pd.json_normalize(raw)
 
+
 def safe_to_numeric(val):
     try:
         return pd.to_numeric(val)
     except:
         return val
 
+
 def format_option_chain(df_raw: pd.DataFrame) -> pd.DataFrame:
+
     if df_raw.empty:
         return pd.DataFrame()
 
@@ -128,6 +137,7 @@ def format_option_chain(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     return merged[cols].sort_values("strike_price").reset_index(drop=True)
 
+
 def fetch_chain_for_underlying(underlying: str, expiries: List[str]) -> pd.DataFrame:
     frames = []
     for e in expiries:
@@ -140,6 +150,7 @@ def fetch_chain_for_underlying(underlying: str, expiries: List[str]) -> pd.DataF
         frames.append(pd.DataFrame({c: [None] for c in formatted.columns}))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
+
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     buf = io.BytesIO()
     df.to_csv(buf, index=False)
@@ -147,35 +158,72 @@ def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 # -------------------
+# MAX PAIN CALCULATION
+# -------------------
+def compute_max_pain(df):
+    df = df.copy()
+
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].fillna(0).values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    n = len(df)
+
+    Q, R, S, T, U = [], [], [], [], []
+
+    for i in range(n):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        u = round((q + r + s + t) / 10000)
+
+        Q.append(q)
+        R.append(r)
+        S.append(s)
+        T.append(t)
+        U.append(u)
+
+    df["Q_call_cost"] = Q
+    df["R_call_intrinsic"] = R
+    df["S_put_cost"] = S
+    df["T_put_intrinsic"] = T
+    df["max_pain"] = U
+
+    return df
+
+
+# -------------------
 # UI
 # -------------------
-st.title("📈 Crypto Option Chain — BTC & ETH (Greeks + OI)")
+st.title("📈 Crypto Option Chain — BTC & ETH (Greeks + OI + Max Pain)")
 
-# Sidebar controls
 st.sidebar.header("Controls")
-selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS, index=0)
-selected_expiry = st.sidebar.selectbox("Expiry", EXPIRIES, index=0)
+selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS)
+selected_expiry = st.sidebar.selectbox("Expiry", EXPIRIES)
 auto_refresh = st.sidebar.checkbox("Auto-refresh", value=True)
-show_charts = st.sidebar.checkbox("Show simple charts", value=True)
-download_raw = st.sidebar.checkbox("Show download buttons", value=True)
+show_charts = st.sidebar.checkbox("Show charts", value=True)
+download_raw = st.sidebar.checkbox("Download CSV", value=True)
 
-# LIVE PRICES
-btc_price = get_btc_price()
-eth_price = get_eth_price()
+# LIVE PRICE FROM DELTA
+price_btc = get_delta_price("BTC")
+price_eth = get_delta_price("ETH")
 
-st.sidebar.metric("BTC Price (USDT)", f"${btc_price:,.2f}" if btc_price else "Error")
-st.sidebar.metric("ETH Price (USDT)", f"${eth_price:,.2f}" if eth_price else "Error")
+st.sidebar.metric("BTC Price (Delta)", f"${price_btc:,.2f}" if price_btc else "Error")
+st.sidebar.metric("ETH Price (Delta)", f"${price_eth:,.2f}" if price_eth else "Error")
 
-# Auto-refresh
 if auto_refresh:
     try:
-        from streamlit_autorefresh import st_autorefresh as _st_autorefresh
-        _st_autorefresh(interval=REFRESH_SECONDS * 1000, limit=None, key="autorefresh")
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=REFRESH_SECONDS * 1000, key="refresh")
     except:
         pass
 
+
 # -------------------
-# DATA FETCH
+# FETCH DATA
 # -------------------
 with st.spinner("Fetching option chain..."):
     df_chain = fetch_chain_for_underlying(selected_underlying, [selected_expiry])
@@ -183,57 +231,51 @@ with st.spinner("Fetching option chain..."):
 if df_chain.empty:
     st.warning("No data returned.")
 else:
-    # ---------------------------------------------------
-    # SAFE HIGHLIGHT LOGIC USING BINANCE PRICE
-    # ---------------------------------------------------
-    current_price = btc_price if selected_underlying == "BTC" else eth_price
+    price = price_btc if selected_underlying == "BTC" else price_eth
     df_display = df_chain.copy()
 
     df_display["strike_price"] = pd.to_numeric(df_display["strike_price"], errors="coerce")
 
+    # 🔥 Add max pain columns
+    df_display = compute_max_pain(df_display)
+
+    # Highlight ATM
     strikes = df_display["strike_price"].dropna().unique()
     strikes_sorted = sorted(strikes)
 
-    lower = None
-    upper = None
-
-    if current_price is not None:
-        lowers = [s for s in strikes_sorted if s <= current_price]
-        uppers = [s for s in strikes_sorted if s >= current_price]
-
-        if lowers:
-            lower = max(lowers)
-        if uppers:
-            upper = min(uppers)
+    lower = max([s for s in strikes_sorted if price and s <= price], default=None)
+    upper = min([s for s in strikes_sorted if price and s >= price], default=None)
 
     def highlight_row(row):
-        if row["strike_price"] == lower or row["strike_price"] == upper:
+        if row["strike_price"] in (lower, upper):
             return ["background-color: yellow"] * len(row)
         return [""] * len(row)
 
     st.subheader(f"{selected_underlying} — expiry {selected_expiry}")
-    st.dataframe(df_display.style.apply(highlight_row, axis=1).format(na_rep=""))
+    st.dataframe(df_display.style.apply(highlight_row, axis=1))
 
     # Download CSV
     if download_raw:
         st.download_button(
-            label="Download CSV",
-            data=df_to_csv_bytes(df_chain),
-            file_name=f"option_chain_{selected_underlying}_{selected_expiry}.csv",
+            "Download CSV",
+            df_to_csv_bytes(df_chain),
+            file_name=f"option_chain_{selected_underlying}.csv",
             mime="text/csv"
         )
 
     # Charts
     if show_charts:
-        tmp = df_display.dropna(subset=["strike_price"])
-        tmp = tmp.sort_values("strike_price")
+        tmp = df_display.dropna(subset=["strike_price"]).sort_values("strike_price")
 
-        chart_df = tmp[["strike_price", "call_oi", "put_oi"]].copy()
+        chart_df = tmp[["strike_price", "call_oi", "put_oi", "max_pain"]].copy()
         chart_df["call_oi"] = pd.to_numeric(chart_df["call_oi"], errors="coerce").fillna(0)
         chart_df["put_oi"] = pd.to_numeric(chart_df["put_oi"], errors="coerce").fillna(0)
 
         st.subheader("Open Interest by Strike")
         st.line_chart(chart_df.set_index("strike_price")[["call_oi", "put_oi"]])
 
+        st.subheader("Max Pain by Strike")
+        st.line_chart(chart_df.set_index("strike_price")[["max_pain"]])
+
 st.markdown("---")
-st.caption("Data via Delta Exchange + Binance APIs.")
+st.caption("Data via Delta Exchange APIs.")
