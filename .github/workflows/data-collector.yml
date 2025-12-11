@@ -2,73 +2,72 @@ name: Collect Option Chain Data
 
 on:
   schedule:
-    - cron: "*/5 * * * *"    # Runs every 10 minutes
-  workflow_dispatch:           # Allows manual execution
+    - cron: "*/5 * * * *"       # Run every 10 minutes
+  workflow_dispatch:              # Allow manual trigger
 
 permissions:
-  contents: write              # REQUIRED so actions can push files
+  contents: write                 # Required so GitHub Actions can push
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
-
-      # -----------------------------
-      # 1. CHECKOUT REPO
-      # -----------------------------
+      # ---------------------------------------------------------
+      # 1. CHECKOUT REPO (FULL HISTORY REQUIRED)
+      # ---------------------------------------------------------
       - name: Checkout repo
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0       # full history required for reset
+          fetch-depth: 0         # MUST BE 0 for reset --hard to work
 
-      # -----------------------------
+      # ---------------------------------------------------------
       # 2. SETUP PYTHON
-      # -----------------------------
-      - name: Setup Python
+      # ---------------------------------------------------------
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      # -----------------------------
-      # 3. INSTALL LIBRARIES
-      # -----------------------------
+      # ---------------------------------------------------------
+      # 3. INSTALL DEPENDENCIES
+      # ---------------------------------------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas requests
 
-      # -----------------------------
+      # ---------------------------------------------------------
       # 4. RUN COLLECTOR SCRIPT
-      # -----------------------------
-      - name: Run collector
+      # ---------------------------------------------------------
+      - name: Run the collector script
         run: python collector.py
 
-      # -----------------------------
-      # 5. COMMIT + PUSH UPDATED CSV
-      #    (Force push to avoid merge conflicts)
-      # -----------------------------
-      - name: Commit & Push updated data
+      # ---------------------------------------------------------
+      # 5. COMMIT & FORCE PUSH UPDATED DATA (NO MERGE CONFLICTS)
+      # ---------------------------------------------------------
+      - name: Commit and force-push updated CSV data
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Configure bot identity
+          # Bot identity
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage any new data
+          # Stage new data produced by collector
           git add data/*
           git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes"
 
-          # Fetch latest remote branch
+          # Fetch latest state from GitHub
           git fetch origin main
 
-          # Reset local branch to match remote (avoid conflicts)
+          # Hard reset to avoid merge conflicts
           git reset --hard origin/main
 
-          # Re-apply changes after reset
+          # Reapply the data changes
           git add data/*
           git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes"
 
-          # Force push to overwrite remote CSV (SAFE for data logs)
+          # Force push ensures the CSV logs are always updated cleanly
           git push --force
+
