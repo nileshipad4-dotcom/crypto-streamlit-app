@@ -1,49 +1,80 @@
 import streamlit as st
 import pandas as pd
 
-st.title("📊 Call OI Change Comparison Tool")
+st.title("📊 Max Pain (U Column) — 3-Way Comparison Tool")
 
-# ---------------------
-# LOAD DATA
-# ---------------------
+# ------------------------------------------------
+# 1️⃣ SELECT UNDERLYING
+# ------------------------------------------------
 underlying = st.selectbox("Select Underlying", ["BTC", "ETH"])
 
 file_path = f"data/{underlying}.csv"
 df = pd.read_csv(file_path)
 
-# Ensure numeric
-df["call_oi"] = pd.to_numeric(df["call_oi"], errors="coerce")
-df["strike_price"] = pd.to_numeric(df["strike_price"], errors="coerce")
+# Ensure numeric types
+for col in ["strike_price", "max_pain"]:
+    df[col] = pd.to_numeric(df[col], errors="coerce")
 
-# ---------------------
-# TIME SELECTION
-# ---------------------
-timestamps = sorted(df["timestamp_IST"].unique())
+# ------------------------------------------------
+# 2️⃣ LOAD REAL-TIME DATA FROM app.py EXPORT
+# (Assumes app.py provides df_live_maxpain externally)
+# ------------------------------------------------
+st.subheader("Upload Live Max Pain CSV from app.py")
 
-t1 = st.selectbox("Select Time 1", timestamps)
-t2 = st.selectbox("Select Time 2", timestamps)
+live_file = st.file_uploader("Upload Live Snapshot (with strike_price + max_pain)", type=["csv"])
 
-if t1 == t2:
-    st.warning("Select two different timestamps for comparison.")
+if live_file is None:
+    st.info("Upload the real-time snapshot exported from app.py")
     st.stop()
 
-# ---------------------
-# FILTER DATA
-# ---------------------
-df1 = df[df["timestamp_IST"] == t1][["strike_price", "call_oi"]].rename(columns={"call_oi": "call_oi_t1"})
-df2 = df[df["timestamp_IST"] == t2][["strike_price", "call_oi"]].rename(columns={"call_oi": "call_oi_t2"})
+df_live = pd.read_csv(live_file)
+df_live["strike_price"] = pd.to_numeric(df_live["strike_price"], errors="coerce")
+df_live["max_pain"] = pd.to_numeric(df_live["max_pain"], errors="coerce")
+df_live = df_live[["strike_price", "max_pain"]].rename(columns={"max_pain": "live_mp"})
 
-# ---------------------
-# MERGE & CALCULATE CHANGE
-# ---------------------
-merged = pd.merge(df1, df2, on="strike_price", how="outer").sort_values("strike_price")
+# ------------------------------------------------
+# 3️⃣ SELECT TWO HISTORICAL TIMESTAMPS FROM CSV
+# ------------------------------------------------
+st.subheader("Select Historical Timeframes (from BTC.csv)")
 
-merged["OI_Change"] = merged["call_oi_t2"] - merged["call_oi_t1"]
+timestamps = sorted(df["timestamp_IST"].unique())
 
-# ---------------------
-# COLOR FUNCTION
-# ---------------------
-def highlight_change(val):
+t1 = st.selectbox("Select Historical Timestamp 1", timestamps)
+t2 = st.selectbox("Select Historical Timestamp 2", timestamps)
+
+if t1 == t2:
+    st.warning("Select two different timestamps.")
+    st.stop()
+
+df_t1 = df[df["timestamp_IST"] == t1][["strike_price", "max_pain"]].rename(columns={"max_pain": "mp_t1"})
+df_t2 = df[df["timestamp_IST"] == t2][["strike_price", "max_pain"]].rename(columns={"max_pain": "mp_t2"})
+
+# ------------------------------------------------
+# 4️⃣ MERGE ALL THREE DATASETS
+# ------------------------------------------------
+merged = pd.merge(df_live, df_t1, on="strike_price", how="outer")
+merged = pd.merge(merged, df_t2, on="strike_price", how="outer")
+
+# ------------------------------------------------
+# 5️⃣ ADD COMPARISON COLUMNS
+# ------------------------------------------------
+merged["diff_live_t1"] = merged["live_mp"] - merged["mp_t1"]
+merged["diff_t1_t2"] = merged["mp_t1"] - merged["mp_t2"]
+
+# Order columns nicely
+merged = merged.sort_values("strike_price")[[
+    "strike_price",
+    "live_mp",
+    "mp_t1",
+    "diff_live_t1",
+    "mp_t2",
+    "diff_t1_t2"
+]]
+
+# ------------------------------------------------
+# 6️⃣ COLOR HIGHLIGHTS FOR DIFFERENCES
+# ------------------------------------------------
+def highlight_diff(val):
     if pd.isna(val):
         return ""
     if val > 0:
@@ -52,11 +83,13 @@ def highlight_change(val):
         return "background-color: pink"
     return ""
 
-# ---------------------
-# SHOW RESULT
-# ---------------------
-st.subheader(f"Call OI Change from {t1} → {t2}")
+# ------------------------------------------------
+# 7️⃣ SHOW TABLE
+# ------------------------------------------------
+st.subheader(f"3-Way Max Pain Comparison  —  Live vs {t1} vs {t2}")
 
 st.dataframe(
-    merged.style.applymap(highlight_change, subset=["OI_Change"])
+    merged.style.applymap(highlight_diff, subset=["diff_live_t1", "diff_t1_t2"])
 )
+
+# DONE
