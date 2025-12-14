@@ -2,8 +2,20 @@ import streamlit as st
 import pandas as pd
 import requests
 
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
 st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Max Pain (BTC)")
+
+# -------------------------------------------------
+# AUTO REFRESH (30s)
+# -------------------------------------------------
+try:
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=30 * 1000, key="refresh")
+except:
+    pass
 
 # -------------------------------------------------
 # CONFIG
@@ -11,11 +23,29 @@ st.title("📊 Strike-wise Comparison + Live Max Pain (BTC)")
 BTC_PATH = "data/BTC.csv"
 
 STRIKE_COL_IDX = 6      # G:G
-VALUE_COL_IDX = 19     # column to compare (your Q/Q or chosen)
+VALUE_COL_IDX = 19     # Column to compare
 TIMESTAMP_COL_IDX = 14 # O:O
 
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "15-12-2025"
+
+# -------------------------------------------------
+# LIVE PRICE (BTC & ETH)
+# -------------------------------------------------
+@st.cache_data(ttl=10)
+def get_delta_price(symbol):
+    try:
+        r = requests.get(API_BASE, timeout=10).json()["result"]
+        sym = "BTCUSD" if symbol == "BTC" else "ETHUSD"
+        return float(next(x for x in r if x["symbol"] == sym)["mark_price"])
+    except:
+        return None
+
+price_btc = get_delta_price("BTC")
+price_eth = get_delta_price("ETH")
+
+st.sidebar.metric("BTC Price (Delta)", f"{int(price_btc):,}" if price_btc else "Error")
+st.sidebar.metric("ETH Price (Delta)", f"{int(price_eth):,}" if price_eth else "Error")
 
 # -------------------------------------------------
 # LOAD BTC.csv
@@ -65,7 +95,7 @@ merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
 merged["change"] = merged["value_time_2"] - merged["value_time_1"]
 
 # -------------------------------------------------
-# 🔥 FETCH LIVE OPTION CHAIN
+# FETCH LIVE OPTION CHAIN
 # -------------------------------------------------
 @st.cache_data(ttl=30)
 def fetch_live_chain():
@@ -84,26 +114,24 @@ df_live_raw = fetch_live_chain()
 # FORMAT LIVE DATA
 # -------------------------------------------------
 df_live = df_live_raw[[
-    "strike_price", "contract_type",
-    "mark_price", "oi_contracts"
+    "strike_price", "contract_type", "mark_price", "oi_contracts"
 ]].copy()
 
-df_live["strike_price"] = pd.to_numeric(df_live["strike_price"], errors="coerce")
-df_live["mark_price"] = pd.to_numeric(df_live["mark_price"], errors="coerce")
-df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
+for c in ["strike_price", "mark_price", "oi_contracts"]:
+    df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
 
 calls = df_live[df_live["contract_type"] == "call_options"]
 puts  = df_live[df_live["contract_type"] == "put_options"]
 
 live = pd.merge(
-    calls.rename(columns={"mark_price":"call_mark","oi_contracts":"call_oi"}),
-    puts.rename(columns={"mark_price":"put_mark","oi_contracts":"put_oi"}),
+    calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+    puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
     on="strike_price",
     how="outer"
 )
 
 # -------------------------------------------------
-# 🔥 COMPUTE LIVE MAX PAIN
+# COMPUTE LIVE MAX PAIN
 # -------------------------------------------------
 def compute_max_pain(df):
     A = df["call_mark"].fillna(0).values
@@ -126,7 +154,7 @@ def compute_max_pain(df):
 df_live_mp = compute_max_pain(live)
 
 # -------------------------------------------------
-# 🔥 MERGE LIVE MAX PAIN (LAST COLUMN)
+# MERGE + REORDER COLUMNS
 # -------------------------------------------------
 final = pd.merge(
     merged,
@@ -134,6 +162,16 @@ final = pd.merge(
     on="strike_price",
     how="left"
 ).sort_values("strike_price")
+
+final = final[
+    ["strike_price", "max_pain", "value_time_1", "value_time_2", "change"]
+]
+
+# -------------------------------------------------
+# REMOVE DECIMALS (INT DISPLAY)
+# -------------------------------------------------
+for col in final.columns:
+    final[col] = final[col].round(0).astype("Int64")
 
 # -------------------------------------------------
 # DISPLAY
@@ -151,4 +189,4 @@ st.dataframe(
     use_container_width=True
 )
 
-st.caption("🟢 Increase | 🔴 Decrease | Live Max Pain from Delta Exchange")
+st.caption("🟢 Increase | 🔴 Decrease | Live Max Pain • Auto-refresh 30s")
