@@ -6,7 +6,7 @@ import os
 
 headers = {"Accept": "application/json"}
 
-EXPIRIES = ["14-12-2025"]
+EXPIRIES = ["15-12-2025"]
 UNDERLYINGS = ["BTC", "ETH"]
 
 API_DELTA = "https://api.india.delta.exchange/v2/tickers"
@@ -171,3 +171,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
