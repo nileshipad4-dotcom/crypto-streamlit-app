@@ -11,13 +11,22 @@ BTC_PATH = "data/BTC.csv"
 df = pd.read_csv(BTC_PATH)
 
 # -------------------------------------------------
-# COLUMN POSITIONS (LOCKED FROM YOUR CSV)
+# COLUMN POSITIONS (LOCKED)
 # -------------------------------------------------
-STRIKE_COL_IDX = 6   # G:G
-CALL_OI_COL_IDX = 1  # B:B (call OI)
-TIMESTAMP_COL = next(
-    c for c in df.columns if "timestamp" in c.lower()
+STRIKE_COL_IDX = 6    # G:G
+CALL_OI_COL_IDX = 1   # B:B
+
+# -------------------------------------------------
+# AUTO-DETECT TIMESTAMP COLUMN
+# -------------------------------------------------
+timestamp_col = next(
+    (c for c in df.columns if "timestamp" in c.lower() or "time" in c.lower()),
+    None
 )
+
+if timestamp_col is None:
+    st.error(f"No timestamp column found in BTC.csv.\nColumns: {list(df.columns)}")
+    st.stop()
 
 # -------------------------------------------------
 # EXTRACT REQUIRED DATA
@@ -25,7 +34,7 @@ TIMESTAMP_COL = next(
 df_extracted = pd.DataFrame({
     "strike_price": pd.to_numeric(df.iloc[:, STRIKE_COL_IDX], errors="coerce"),
     "call_oi": pd.to_numeric(df.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-    "timestamp": df[TIMESTAMP_COL]
+    "timestamp": df[timestamp_col]
 })
 
 # -------------------------------------------------
@@ -33,8 +42,12 @@ df_extracted = pd.DataFrame({
 # -------------------------------------------------
 timestamps = sorted(df_extracted["timestamp"].dropna().unique())
 
+if len(timestamps) < 2:
+    st.error("Not enough timestamps in BTC.csv to compare.")
+    st.stop()
+
 t1 = st.selectbox("Select Time 1", timestamps, index=0)
-t2 = st.selectbox("Select Time 2", timestamps, index=1 if len(timestamps) > 1 else 0)
+t2 = st.selectbox("Select Time 2", timestamps, index=1)
 
 if t1 == t2:
     st.warning("Please select two different timestamps.")
@@ -92,4 +105,3 @@ st.dataframe(
 )
 
 st.caption("🟢 Increase in Call OI | 🔴 Decrease in Call OI")
-
