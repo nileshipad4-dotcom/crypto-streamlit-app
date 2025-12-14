@@ -11,21 +11,18 @@ BTC_PATH = "data/BTC.csv"
 df = pd.read_csv(BTC_PATH)
 
 # -------------------------------------------------
-# COLUMN POSITIONS (LOCKED)
+# FIXED COLUMN LOCATIONS (AS CONFIRMED)
 # -------------------------------------------------
-STRIKE_COL_IDX = 6    # G:G
-CALL_OI_COL_IDX = 1   # B:B
+STRIKE_COL_IDX = 6    # Column G
+CALL_OI_COL_IDX = 1   # Column B
+TIMESTAMP_COL = "timestamp_IST"
 
 # -------------------------------------------------
-# AUTO-DETECT TIMESTAMP COLUMN
+# BASIC VALIDATION
 # -------------------------------------------------
-timestamp_col = next(
-    (c for c in df.columns if "timestamp" in c.lower() or "time" in c.lower()),
-    None
-)
-
-if timestamp_col is None:
-    st.error(f"No timestamp column found in BTC.csv.\nColumns: {list(df.columns)}")
+if TIMESTAMP_COL not in df.columns:
+    st.error(f"Column '{TIMESTAMP_COL}' not found in BTC.csv")
+    st.write("Available columns:", list(df.columns))
     st.stop()
 
 # -------------------------------------------------
@@ -34,13 +31,16 @@ if timestamp_col is None:
 df_extracted = pd.DataFrame({
     "strike_price": pd.to_numeric(df.iloc[:, STRIKE_COL_IDX], errors="coerce"),
     "call_oi": pd.to_numeric(df.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-    "timestamp": df[timestamp_col]
+    "timestamp": df[TIMESTAMP_COL]
 })
+
+# Drop rows with missing strike or timestamp
+df_extracted = df_extracted.dropna(subset=["strike_price", "timestamp"])
 
 # -------------------------------------------------
 # TIME SELECTION
 # -------------------------------------------------
-timestamps = sorted(df_extracted["timestamp"].dropna().unique())
+timestamps = sorted(df_extracted["timestamp"].unique())
 
 if len(timestamps) < 2:
     st.error("Not enough timestamps in BTC.csv to compare.")
@@ -105,3 +105,4 @@ st.dataframe(
 )
 
 st.caption("🟢 Increase in Call OI | 🔴 Decrease in Call OI")
+
