@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import datetime, timedelta
 
 # =================================================
 # PAGE CONFIG
 # =================================================
 st.set_page_config(layout="wide")
-st.title("📊 Strike-wise Comparison + Live Max Pain (BTC)")
+st.title("📊 Strike-wise Comparison + Live Data (BTC)")
 
 # =================================================
 # AUTO REFRESH (30s)
@@ -22,25 +23,32 @@ except:
 # =================================================
 BTC_PATH = "data/BTC.csv"
 
-STRIKE_COL_IDX = 6      # G:G
-VALUE_COL_IDX = 19     # Column to compare
-TIMESTAMP_COL_IDX = 14 # O:O
+STRIKE_COL_IDX = 6
+VALUE_COL_IDX = 19
+TIMESTAMP_COL_IDX = 14
 
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "15-12-2025"
 
 # =================================================
-# LIVE PRICE (BTC & ETH)
+# IST TIME
+# =================================================
+def get_ist_time():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
+
+current_time_label = get_ist_time()
+
+# =================================================
+# LIVE PRICE
 # =================================================
 @st.cache_data(ttl=10)
-def get_delta_price(symbol: str):
+def get_delta_price(symbol):
     try:
         r = requests.get(API_BASE, timeout=10).json()["result"]
         sym = "BTCUSD" if symbol == "BTC" else "ETHUSD"
         return float(next(x for x in r if x["symbol"] == sym)["mark_price"])
     except:
         return None
-
 
 price_btc = get_delta_price("BTC")
 price_eth = get_delta_price("ETH")
@@ -82,20 +90,19 @@ df_t1 = (
     df[df["timestamp"] == t1]
     .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"value": "value_time_1"})
+    .rename(columns={"value": t1})
 )
 
 df_t2 = (
     df[df["timestamp"] == t2]
     .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"value": "value_time_2"})
+    .rename(columns={"value": t2})
 )
 
 merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
 
-# change = value_time_1 − value_time_2
-merged["change"] = merged["value_time_1"] - merged["value_time_2"]
+merged["change"] = merged[t1] - merged[t2]
 
 # =================================================
 # FETCH LIVE OPTION CHAIN
@@ -110,7 +117,6 @@ def fetch_live_chain():
     )
     r = requests.get(url, timeout=20).json()["result"]
     return pd.json_normalize(r)
-
 
 df_live_raw = fetch_live_chain()
 
@@ -135,40 +141,39 @@ live = pd.merge(
 )
 
 # =================================================
-# COMPUTE LIVE MAX PAIN
+# COMPUTE LIVE VALUE (MAX PAIN LOGIC)
 # =================================================
-def compute_max_pain(df: pd.DataFrame) -> pd.DataFrame:
+def compute_live_value(df):
     A = df["call_mark"].fillna(0).values
     B = df["call_oi"].fillna(0).values
     G = df["strike_price"].fillna(0).values
     L = df["put_oi"].fillna(0).values
     M = df["put_mark"].fillna(0).values
 
-    mp = []
+    out = []
     for i in range(len(df)):
         Q = -sum(A[i:] * B[i:])
         R = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
         S = -sum(M[:i] * L[:i])
         T = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-        mp.append(round((Q + R + S + T) / 10000))
+        out.append(round((Q + R + S + T) / 10000))
 
-    df["max_pain"] = mp
-    return df[["strike_price", "max_pain"]]
+    df[current_time_label] = out
+    return df[["strike_price", current_time_label]]
 
-
-df_live_mp = compute_max_pain(live)
+df_live_value = compute_live_value(live)
 
 # =================================================
-# MERGE + EXTRA CALCULATION
+# MERGE ALL
 # =================================================
 final = pd.merge(
     merged,
-    df_live_mp,
+    df_live_value,
     on="strike_price",
     how="left"
 ).sort_values("strike_price")
 
-final["mp_minus_time1"] = final["max_pain"] - final["value_time_1"]
+final[f"{current_time_label} - {t1}"] = final[current_time_label] - final[t1]
 
 # =================================================
 # COLUMN ORDER
@@ -176,10 +181,10 @@ final["mp_minus_time1"] = final["max_pain"] - final["value_time_1"]
 final = final[
     [
         "strike_price",
-        "max_pain",
-        "mp_minus_time1",
-        "value_time_1",
-        "value_time_2",
+        current_time_label,
+        f"{current_time_label} - {t1}",
+        t1,
+        t2,
         "change",
     ]
 ]
@@ -191,53 +196,25 @@ for col in final.columns:
     final[col] = final[col].round(0).astype("Int64")
 
 # =================================================
-# FIND ATM STRIKES
-# =================================================
-lower_strike = upper_strike = None
-
-if price_btc:
-    strikes = final["strike_price"].dropna().astype(float).tolist()
-    lower = [s for s in strikes if s <= price_btc]
-    upper = [s for s in strikes if s >= price_btc]
-
-    if lower:
-        lower_strike = max(lower)
-    if upper:
-        upper_strike = min(upper)
-
-# =================================================
 # STYLING
 # =================================================
 def color_change(v):
-    if pd.isna(v):
-        return ""
-    if v > 0:
-        return "background-color: lightgreen"
-    if v < 0:
-        return "background-color: lightcoral"
+    if pd.isna(v): return ""
+    if v > 0: return "background-color: lightgreen"
+    if v < 0: return "background-color: lightcoral"
     return ""
 
-
-def highlight_atm(row):
-    styles = [""] * len(row)
-    if row["strike_price"] in (lower_strike, upper_strike):
-        styles[0] = "background-color: #ffb676"
-        styles[1] = "background-color: #ffb676"
-    return styles
-
-# =================================================
-# DISPLAY
-# =================================================
-st.subheader(f"Comparison {t1} → {t2} + Live Max Pain")
+st.subheader(f"Live vs {t1} vs {t2}")
 
 st.dataframe(
-    final.style
-        .applymap(color_change, subset=["change", "mp_minus_time1"])
-        .apply(highlight_atm, axis=1),
+    final.style.applymap(
+        color_change,
+        subset=[f"{current_time_label} - {t1}", "change"]
+    ),
     use_container_width=True
 )
 
 st.caption(
-    "🔵 ATM Strikes | 🟢 Positive | 🔴 Negative | "
-    "Live Max Pain • Auto-refresh 30s"
+    "🟢 Positive | 🔴 Negative | "
+    "Live column shows current time snapshot • Auto-refresh 30s"
 )
