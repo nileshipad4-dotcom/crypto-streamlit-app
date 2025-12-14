@@ -35,14 +35,12 @@ def fetch_option_chain(underlying, expiry):
     return pd.json_normalize(r.json().get("result", []))
 
 
-def safe_num(x):
-    try:
-        return pd.to_numeric(x)
-    except:
-        return 0
-
-
+# -------------------
+# FORMAT OPTION CHAIN (SAFE)
+# -------------------
 def format_chain(df):
+
+    # Keep contract_type as STRING
     df = df[
         [
             "strike_price",
@@ -50,12 +48,14 @@ def format_chain(df):
             "mark_price",
             "oi_contracts"
         ]
-    ]
+    ].copy()
 
-    df = df.applymap(safe_num)
+    # Convert ONLY numeric columns
+    for col in ["strike_price", "mark_price", "oi_contracts"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    calls = df[df.contract_type == "call_options"]
-    puts  = df[df.contract_type == "put_options"]
+    calls = df[df["contract_type"] == "call_options"].copy()
+    puts  = df[df["contract_type"] == "put_options"].copy()
 
     calls = calls.rename(columns={
         "mark_price": "call_mark",
@@ -67,18 +67,20 @@ def format_chain(df):
         "oi_contracts": "put_oi"
     }).drop(columns="contract_type")
 
-    return pd.merge(calls, puts, on="strike_price").sort_values("strike_price")
+    merged = pd.merge(calls, puts, on="strike_price", how="inner")
+    return merged.sort_values("strike_price").reset_index(drop=True)
 
 
 # -------------------
-# MAX PAIN CALCULATION (U COLUMN)
+# MAX PAIN (U COLUMN)
 # -------------------
 def compute_max_pain(df):
-    A = df.call_mark.values
-    B = df.call_oi.values
-    G = df.strike_price.values
-    L = df.put_oi.values
-    M = df.put_mark.values
+
+    A = df["call_mark"].values
+    B = df["call_oi"].values
+    G = df["strike_price"].values
+    L = df["put_oi"].values
+    M = df["put_mark"].values
 
     U = []
 
@@ -115,37 +117,27 @@ if raw.empty:
     st.stop()
 
 df_chain = format_chain(raw)
+
+if df_chain.empty:
+    st.error("Option chain formatting failed (calls/puts empty).")
+    st.stop()
+
 df_chain = compute_max_pain(df_chain)
 
 # -------------------
-# FINAL REQUIRED OUTPUT
+# FINAL OUTPUT (ONLY WHAT YOU WANT)
 # -------------------
 df_max_pain = df_chain[["strike_price", "max_pain"]].copy()
-df_max_pain = df_max_pain.dropna().sort_values("strike_price").reset_index(drop=True)
 
-# -------------------
-# SAVE FOR OTHER APPS
-# -------------------
+# Save for other apps
 os.makedirs("shared", exist_ok=True)
+df_max_pain.to_csv("shared/live_max_pain.csv", index=False)
 
-df_max_pain.to_csv(
-    "shared/live_max_pain.csv",
-    index=False
-)
-
-# -------------------
-# DISPLAY
-# -------------------
+# Display
 st.subheader(f"Max Pain — {underlying} | Expiry {EXPIRY}")
+st.dataframe(df_max_pain, use_container_width=True)
 
-st.dataframe(
-    df_max_pain,
-    use_container_width=True
-)
-
-# -------------------
-# DOWNLOAD
-# -------------------
+# Download
 st.download_button(
     "Download Max Pain CSV",
     data=df_max_pain.to_csv(index=False),
