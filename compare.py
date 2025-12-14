@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(layout="wide")
-st.title("📊 Call OI Comparison Between Two Times (BTC.csv)")
+st.title("📊 Strike-wise Comparison Between Two Times (BTC.csv)")
 
 # -------------------------------------------------
 # LOAD BTC.csv
@@ -11,30 +11,22 @@ BTC_PATH = "data/BTC.csv"
 df = pd.read_csv(BTC_PATH)
 
 # -------------------------------------------------
-# FIXED COLUMN LOCATIONS (AS CONFIRMED)
+# FIXED COLUMN INDICES (AS CONFIRMED)
 # -------------------------------------------------
-STRIKE_COL_IDX = 6    # Column G
-CALL_OI_COL_IDX = 1   # Column B
-TIMESTAMP_COL = "timestamp_IST"
+STRIKE_COL_IDX = 6     # G:G
+VALUE_COL_IDX = 16     # Q:Q (column to compare)
+TIMESTAMP_COL_IDX = 14 # O:O
 
 # -------------------------------------------------
-# BASIC VALIDATION
-# -------------------------------------------------
-if TIMESTAMP_COL not in df.columns:
-    st.error(f"Column '{TIMESTAMP_COL}' not found in BTC.csv")
-    st.write("Available columns:", list(df.columns))
-    st.stop()
-
-# -------------------------------------------------
-# EXTRACT REQUIRED DATA
+# EXTRACT REQUIRED DATA BY POSITION
 # -------------------------------------------------
 df_extracted = pd.DataFrame({
     "strike_price": pd.to_numeric(df.iloc[:, STRIKE_COL_IDX], errors="coerce"),
-    "call_oi": pd.to_numeric(df.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-    "timestamp": df[TIMESTAMP_COL]
+    "value": pd.to_numeric(df.iloc[:, VALUE_COL_IDX], errors="coerce"),
+    "timestamp": df.iloc[:, TIMESTAMP_COL_IDX]
 })
 
-# Drop rows with missing strike or timestamp
+# Drop invalid rows
 df_extracted = df_extracted.dropna(subset=["strike_price", "timestamp"])
 
 # -------------------------------------------------
@@ -58,16 +50,16 @@ if t1 == t2:
 # -------------------------------------------------
 df_t1 = (
     df_extracted[df_extracted["timestamp"] == t1]
-    .groupby("strike_price", as_index=False)["call_oi"]
+    .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"call_oi": "call_oi_time_1"})
+    .rename(columns={"value": "value_time_1"})
 )
 
 df_t2 = (
     df_extracted[df_extracted["timestamp"] == t2]
-    .groupby("strike_price", as_index=False)["call_oi"]
+    .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"call_oi": "call_oi_time_2"})
+    .rename(columns={"value": "value_time_2"})
 )
 
 # -------------------------------------------------
@@ -80,7 +72,7 @@ merged = pd.merge(
     how="outer"
 ).sort_values("strike_price")
 
-merged["call_oi_change"] = merged["call_oi_time_2"] - merged["call_oi_time_1"]
+merged["change"] = merged["value_time_2"] - merged["value_time_1"]
 
 # -------------------------------------------------
 # COLOR FUNCTION
@@ -97,12 +89,11 @@ def color_change(val):
 # -------------------------------------------------
 # DISPLAY
 # -------------------------------------------------
-st.subheader(f"Call OI Change: {t1} → {t2}")
+st.subheader(f"Comparison: {t1} → {t2}")
 
 st.dataframe(
-    merged.style.applymap(color_change, subset=["call_oi_change"]),
+    merged.style.applymap(color_change, subset=["change"]),
     use_container_width=True
 )
 
-st.caption("🟢 Increase in Call OI | 🔴 Decrease in Call OI")
-
+st.caption("🟢 Increase | 🔴 Decrease")
