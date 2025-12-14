@@ -3,8 +3,6 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from typing import List
-import io
 import os
 
 # -------------------
@@ -141,8 +139,12 @@ selected_expiry = st.sidebar.selectbox("Expiry", EXPIRIES)
 auto_refresh = st.sidebar.checkbox("Auto-refresh", True)
 download_raw = st.sidebar.checkbox("Download CSV", True)
 
-price = get_delta_price(selected_underlying)
-st.sidebar.metric(f"{selected_underlying} Price (Delta)", f"{price:,.2f}" if price else "Error")
+# 🔥 SHOW BOTH LIVE PRICES
+price_btc = get_delta_price("BTC")
+price_eth = get_delta_price("ETH")
+
+st.sidebar.metric("BTC Price (Delta)", f"{price_btc:,.2f}" if price_btc else "Error")
+st.sidebar.metric("ETH Price (Delta)", f"{price_eth:,.2f}" if price_eth else "Error")
 
 if auto_refresh:
     try:
@@ -158,13 +160,12 @@ raw = fetch_tickers(selected_underlying, selected_expiry)
 df = format_option_chain(raw)
 df = compute_max_pain(df)
 
-# 🔥 ADD LIVE TIMESTAMP
+# Add timestamp
 df["timestamp_IST"] = get_ist_time()
 
-# 🔥 SAVE LIVE CSV (AUTO-UPDATED)
+# Save live CSV
 os.makedirs("live", exist_ok=True)
-live_path = f"live/{selected_underlying}_live.csv"
-df.to_csv(live_path, index=False)
+df.to_csv(f"live/{selected_underlying}_live.csv", index=False)
 
 # -------------------
 # DISPLAY
@@ -172,7 +173,6 @@ df.to_csv(live_path, index=False)
 st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
 st.dataframe(df, use_container_width=True)
 
-# 🔥 USER DOWNLOAD
 if download_raw:
     st.download_button(
         "Download Live CSV",
