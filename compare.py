@@ -1,68 +1,46 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import requests
-import os
 
-# -------------------
+# -------------------------------------------------
 # CONFIG
-# -------------------
-EXPIRY = "15-12-2025"
-UNDERLYINGS = ["BTC", "ETH"]
-REFRESH_SECONDS = 30
-
+# -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 HEADERS = {"Accept": "application/json"}
+EXPIRY = "15-12-2025"
 
 st.set_page_config(
-    page_title="Live Max Pain",
+    page_title="Live vs Historical Max Pain",
     layout="wide"
 )
 
-# -------------------
-# LIVE PRICE FROM DELTA
-# -------------------
-@st.cache_data(ttl=10)
-def get_delta_price(symbol):
-    try:
-        r = requests.get(API_BASE, timeout=10).json()["result"]
-        sym = "BTCUSD" if symbol == "BTC" else "ETHUSD"
-        ticker = next(x for x in r if x["symbol"] == sym)
-        return float(ticker["mark_price"])
-    except:
-        return None
+st.title("📊 Max Pain Comparison (Live vs BTC.csv)")
 
-
-# -------------------
-# FETCH OPTION DATA
-# -------------------
-@st.cache_data(ttl=60)
-def fetch_option_chain(underlying, expiry):
+# -------------------------------------------------
+# LIVE MAX PAIN (FROM DELTA API)
+# -------------------------------------------------
+@st.cache_data(ttl=30)
+def fetch_live_max_pain():
     url = (
         f"{API_BASE}"
         f"?contract_types=call_options,put_options"
-        f"&underlying_asset_symbols={underlying}"
-        f"&expiry_date={expiry}"
+        f"&underlying_asset_symbols=BTC"
+        f"&expiry_date={EXPIRY}"
     )
+
     r = requests.get(url, headers=HEADERS, timeout=20)
     r.raise_for_status()
-    return pd.json_normalize(r.json().get("result", []))
+    raw = pd.json_normalize(r.json().get("result", []))
 
-
-# -------------------
-# FORMAT OPTION CHAIN (SAFE)
-# -------------------
-def format_chain(df):
-
-    df = df[
+    # Keep only required columns
+    raw = raw[
         ["strike_price", "contract_type", "mark_price", "oi_contracts"]
     ].copy()
 
-    for col in ["strike_price", "mark_price", "oi_contracts"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    raw["strike_price"] = pd.to_numeric(raw["strike_price"], errors="coerce")
 
-    calls = df[df["contract_type"] == "call_options"].copy()
-    puts  = df[df["contract_type"] == "put_options"].copy()
+    calls = raw[raw["contract_type"] == "call_options"].copy()
+    puts  = raw[raw["contract_type"] == "put_options"].copy()
 
     calls = calls.rename(columns={
         "mark_price": "call_mark",
@@ -74,23 +52,17 @@ def format_chain(df):
         "oi_contracts": "put_oi"
     }).drop(columns="contract_type")
 
-    merged = pd.merge(calls, puts, on="strike_price", how="inner")
-    return merged.sort_values("strike_price").reset_index(drop=True)
+    df = pd.merge(calls, puts, on="strike_price", how="inner")
+    df = df.sort_values("strike_price").reset_index(drop=True)
 
-
-# -------------------
-# MAX PAIN (U COLUMN)
-# -------------------
-def compute_max_pain(df):
-
-    A = df["call_mark"].values
-    B = df["call_oi"].values
-    G = df["strike_price"].values
-    L = df["put_oi"].values
-    M = df["put_mark"].values
+    # ---- MAX PAIN CALCULATION (LIVE) ----
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].fillna(0).values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
 
     U = []
-
     for i in range(len(df)):
         Q = -sum(A[i:] * B[i:])
         R = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
@@ -98,97 +70,55 @@ def compute_max_pain(df):
         T = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
         U.append(round((Q + R + S + T) / 10000))
 
-    df["max_pain"] = U
-    return df
+    df["live_max_pain"] = U
+
+    return df[["strike_price", "live_max_pain"]]
 
 
-# -------------------
-# UI
-# -------------------
-st.title("📊 Live Max Pain (Strike vs U Column)")
+df_live = fetch_live_max_pain()
 
-underlying = st.selectbox("Select Underlying", UNDERLYINGS)
+# -------------------------------------------------
+# HISTORICAL MAX PAIN (FROM BTC.csv)
+# -------------------------------------------------
+btc_path = "data/BTC.csv"
+df_hist = pd.read_csv(btc_path)
 
-# Auto-refresh
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=REFRESH_SECONDS * 1000, key="refresh")
-except:
-    pass
+# Ensure correct dtypes
+df_hist["strike_price"] = pd.to_numeric(df_hist["strike_price"], errors="coerce")
+df_hist["max_pain"] = pd.to_numeric(df_hist["max_pain"], errors="coerce")
 
-# Live price
-price = get_delta_price(underlying)
-st.metric(
-    f"{underlying} Price (Delta)",
-    f"{price:,.2f}" if price else "Error"
-)
+# Timestamp selector
+st.subheader("Select Historical Timestamp (BTC.csv)")
+timestamps = sorted(df_hist["timestamp_IST"].dropna().unique())
+selected_ts = st.selectbox("Timestamp (IST)", timestamps)
 
-with st.spinner("Fetching option chain..."):
-    raw = fetch_option_chain(underlying, EXPIRY)
+df_hist_snap = df_hist[df_hist["timestamp_IST"] == selected_ts][
+    ["strike_price", "max_pain"]
+].rename(columns={"max_pain": "historical_max_pain"})
 
-if raw.empty:
-    st.warning("No data returned from Delta Exchange.")
-    st.stop()
+# -------------------------------------------------
+# MERGE LIVE + HISTORICAL
+# -------------------------------------------------
+final_df = pd.merge(
+    df_live,
+    df_hist_snap,
+    on="strike_price",
+    how="outer"
+).sort_values("strike_price")
 
-df_chain = format_chain(raw)
-
-if df_chain.empty:
-    st.error("Option chain formatting failed.")
-    st.stop()
-
-df_chain = compute_max_pain(df_chain)
-
-# -------------------
-# FINAL TABLE (ONLY REQUIRED COLUMNS)
-# -------------------
-df_mp = df_chain[["strike_price", "max_pain"]].copy()
-
-# Identify lower & upper strike around price
-lower_strike = None
-upper_strike = None
-
-if price is not None:
-    strikes = df_mp["strike_price"].values
-    lower = [s for s in strikes if s <= price]
-    upper = [s for s in strikes if s >= price]
-
-    if lower:
-        lower_strike = max(lower)
-    if upper:
-        upper_strike = min(upper)
-
-# -------------------
-# ROW HIGHLIGHTING
-# -------------------
-def highlight_row(row):
-    if row["strike_price"] == lower_strike:
-        return ["background-color: lightgreen"] * len(row)
-    if row["strike_price"] == upper_strike:
-        return ["background-color: lightcoral"] * len(row)
-    return [""] * len(row)
-
-# -------------------
-# SAVE FOR OTHER APPS
-# -------------------
-os.makedirs("shared", exist_ok=True)
-df_mp.to_csv("shared/live_max_pain.csv", index=False)
-
-# -------------------
-# DISPLAY
-# -------------------
-st.subheader(f"Max Pain — {underlying} | Expiry {EXPIRY}")
+# -------------------------------------------------
+# DISPLAY (EXACTLY 3 COLUMNS)
+# -------------------------------------------------
+st.subheader("Strike-wise Max Pain Comparison")
 
 st.dataframe(
-    df_mp.style.apply(highlight_row, axis=1),
+    final_df[
+        ["strike_price", "live_max_pain", "historical_max_pain"]
+    ],
     use_container_width=True
 )
 
-# Download
-st.download_button(
-    "Download Max Pain CSV",
-    data=df_mp.to_csv(index=False),
-    file_name=f"max_pain_{underlying}_{EXPIRY}.csv",
-    mime="text/csv"
+st.caption(
+    f"Live max pain from Delta API • "
+    f"Historical max pain from BTC.csv @ {selected_ts}"
 )
-
-st.caption("🟢 Lower strike | 🔴 Upper strike • Auto-updated every 30s")
