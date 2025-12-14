@@ -14,7 +14,7 @@ df = pd.read_csv(BTC_PATH)
 # FIXED COLUMN INDICES (AS CONFIRMED)
 # -------------------------------------------------
 STRIKE_COL_IDX = 6     # G:G
-VALUE_COL_IDX = 16     # Q:Q (column to compare)
+VALUE_COL_IDX = 19     # Q:Q (column to compare)
 TIMESTAMP_COL_IDX = 14 # O:O
 
 # -------------------------------------------------
@@ -97,3 +97,4 @@ st.dataframe(
 )
 
 st.caption("🟢 Increase | 🔴 Decrease")
+
