@@ -1,136 +1,88 @@
+# compare_oi.py
 import streamlit as st
 import pandas as pd
-import requests
-import numpy as np
+import os
 
-# -------------------------------------------------
-# CONFIG
-# -------------------------------------------------
-API_BASE = "https://api.india.delta.exchange/v2/tickers"
-HEADERS = {"Accept": "application/json"}
-EXPIRY = "15-12-2025"
+st.set_page_config(page_title="Call OI Change Comparator", layout="wide")
 
-STRIKE_COL_IDX = 6   # G:G
-MAX_PAIN_COL_IDX = 19  # T:T
+st.title("📊 Call OI Change — Strike-wise Comparison")
 
-st.set_page_config(page_title="Live vs Historical Max Pain", layout="wide")
-st.title("📊 Max Pain Comparison (Live vs BTC.csv)")
+DATA_DIR = "data"  # adjust if your CSVs live elsewhere
 
-# -------------------------------------------------
-# LIVE MAX PAIN (DELTA API)
-# -------------------------------------------------
-@st.cache_data(ttl=30)
-def fetch_live_max_pain():
+# Choose underlying
+underlying = st.selectbox("Select Underlying", ["BTC", "ETH"])
 
-    url = (
-        f"{API_BASE}"
-        f"?contract_types=call_options,put_options"
-        f"&underlying_asset_symbols=BTC"
-        f"&expiry_date={EXPIRY}"
-    )
+file_path = os.path.join(DATA_DIR, f"{underlying}.csv")
 
-    r = requests.get(url, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    raw = pd.json_normalize(r.json().get("result", []))
-
-    raw = raw[
-        ["strike_price", "contract_type", "mark_price", "oi_contracts"]
-    ].copy()
-
-    raw["strike_price"] = pd.to_numeric(raw["strike_price"], errors="coerce")
-
-    calls = raw[raw["contract_type"] == "call_options"].copy()
-    puts  = raw[raw["contract_type"] == "put_options"].copy()
-
-    calls = calls.rename(columns={
-        "mark_price": "call_mark",
-        "oi_contracts": "call_oi"
-    }).drop(columns="contract_type")
-
-    puts = puts.rename(columns={
-        "mark_price": "put_mark",
-        "oi_contracts": "put_oi"
-    }).drop(columns="contract_type")
-
-    df = pd.merge(calls, puts, on="strike_price", how="inner")
-    df = df.sort_values("strike_price").reset_index(drop=True)
-
-    A = df["call_mark"].astype(float).to_numpy()
-    B = df["call_oi"].astype(float).to_numpy()
-    G = df["strike_price"].astype(float).to_numpy()
-    L = df["put_oi"].astype(float).to_numpy()
-    M = df["put_mark"].astype(float).to_numpy()
-
-    U = []
-    for i in range(len(df)):
-        Q = -np.sum(A[i:] * B[i:])
-        R = G[i] * np.sum(B[:i]) - np.sum(G[:i] * B[:i])
-        S = -np.sum(M[:i] * L[:i])
-        T = np.sum(G[i:] * L[i:]) - G[i] * np.sum(L[i:])
-        U.append(round((Q + R + S + T) / 10000))
-
-    df["live_max_pain"] = U
-    return df[["strike_price", "live_max_pain"]]
-
-
-df_live = fetch_live_max_pain()
-
-# -------------------------------------------------
-# HISTORICAL MAX PAIN (BTC.csv — BY POSITION)
-# -------------------------------------------------
-btc_path = "data/BTC.csv"
-df_hist = pd.read_csv(btc_path)
-
-# Timestamp column (safe detection)
-ts_col = next(
-    (c for c in df_hist.columns if "timestamp" in c.lower()),
-    None
-)
-
-if ts_col is None:
-    st.error("timestamp_IST column not found in BTC.csv")
+if not os.path.exists(file_path):
+    st.error(f"No data file found: {file_path}. Run the collector or check the path.")
     st.stop()
 
-# Extract required columns BY POSITION
-df_hist_extracted = pd.DataFrame({
-    "strike_price": pd.to_numeric(df_hist.iloc[:, STRIKE_COL_IDX], errors="coerce"),
-    "historical_max_pain": pd.to_numeric(df_hist.iloc[:, MAX_PAIN_COL_IDX], errors="coerce"),
-    "timestamp_IST": df_hist[ts_col]
-})
+@st.cache_data(ttl=60)
+def load_df(path):
+    df = pd.read_csv(path)
+    # ensure columns exist and types
+    if "strike_price" in df.columns:
+        df["strike_price"] = pd.to_numeric(df["strike_price"], errors="coerce")
+    if "call_oi" in df.columns:
+        df["call_oi"] = pd.to_numeric(df["call_oi"], errors="coerce")
+    # keep only rows that have a timestamp
+    if "timestamp_IST" in df.columns:
+        df = df[df["timestamp_IST"].notna()]
+    return df
 
-# Timestamp selector
-st.subheader("Select Historical Timestamp (BTC.csv)")
-timestamps = sorted(df_hist_extracted["timestamp_IST"].dropna().unique())
-selected_ts = st.selectbox("Timestamp (IST)", timestamps)
+df = load_df(file_path)
 
-df_hist_snap = df_hist_extracted[
-    df_hist_extracted["timestamp_IST"] == selected_ts
-]
+timestamps = sorted(df["timestamp_IST"].unique())
+if len(timestamps) < 2:
+    st.warning("Not enough timestamps in data to compare. Wait for more collector runs.")
+    st.dataframe(df.head(10))
+    st.stop()
 
-# -------------------------------------------------
-# MERGE LIVE + HISTORICAL
-# -------------------------------------------------
-final_df = pd.merge(
-    df_live,
-    df_hist_snap[["strike_price", "historical_max_pain"]],
-    on="strike_price",
-    how="outer"
-).sort_values("strike_price")
+# select times
+col1, col2 = st.columns(2)
+with col1:
+    t1 = st.selectbox("Time 1 (older)", timestamps, index=max(0, len(timestamps)-2))
+with col2:
+    t2 = st.selectbox("Time 2 (newer)", timestamps, index=len(timestamps)-1)
 
-# -------------------------------------------------
-# DISPLAY (ONLY 3 COLUMNS)
-# -------------------------------------------------
-st.subheader("Strike-wise Max Pain Comparison")
+if t1 == t2:
+    st.warning("Please select two different timestamps.")
+    st.stop()
 
-st.dataframe(
-    final_df[
-        ["strike_price", "live_max_pain", "historical_max_pain"]
-    ],
-    use_container_width=True
-)
+# filter and prepare
+df1 = df[df["timestamp_IST"] == t1][["strike_price", "call_oi"]].rename(columns={"call_oi": f"call_oi_{t1}"})
+df2 = df[df["timestamp_IST"] == t2][["strike_price", "call_oi"]].rename(columns={"call_oi": f"call_oi_{t2}"})
 
-st.caption(
-    f"Live max pain from Delta API • "
-    f"Historical max pain from BTC.csv @ {selected_ts}"
-)
+merged = pd.merge(df1, df2, on="strike_price", how="outer").sort_values("strike_price").reset_index(drop=True)
+merged[f"OI_Change_{t2}_minus_{t1}"] = merged[f"call_oi_{t2}"] - merged[f"call_oi_{t1}"]
 
+# present results
+st.subheader(f"Call OI change: {underlying} — {t1} → {t2}")
+
+# add sorting / filters
+sort_by = st.selectbox("Sort by", [f"OI_Change_{t2}_minus_{t1}", "strike_price"], index=0)
+ascending = st.checkbox("Ascending", value=False)
+
+display_df = merged.copy()
+display_df = display_df.sort_values(by=sort_by, ascending=ascending)
+
+# color styling
+def style_change(v):
+    if pd.isna(v):
+        return ""
+    if v > 0:
+        return "background-color: #d4f4dd"  # light green
+    if v < 0:
+        return "background-color: #ffd8d8"  # light red
+    return ""
+
+st.dataframe(display_df.style.applymap(style_change, subset=[f"OI_Change_{t2}_minus_{t1}"]), use_container_width=True)
+
+# totals summary
+total_t1 = merged[f"call_oi_{t1}"].sum(min_count=1)
+total_t2 = merged[f"call_oi_{t2}"].sum(min_count=1)
+total_change = total_t2 - total_t1
+
+st.markdown("---")
+st.write(f"Total Call OI at {t1}: {total_t1:.0f}  •  at {t2}: {total_t2:.0f}  •  Change: {total_change:.0f}")
