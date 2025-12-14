@@ -9,7 +9,7 @@ import io
 # -------------------
 # CONFIG
 # -------------------
-EXPIRIES = ["14-12-2025"]
+EXPIRIES = ["15-12-2025"]
 UNDERLYINGS = ["BTC", "ETH"]
 REFRESH_SECONDS = 30
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
@@ -279,3 +279,4 @@ else:
 
 st.markdown("---")
 st.caption("Data via Delta Exchange APIs.")
+
