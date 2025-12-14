@@ -92,6 +92,8 @@ df_t2 = (
 )
 
 merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
+
+# ✅ change = value_time_1 − value_time_2
 merged["change"] = merged["value_time_1"] - merged["value_time_2"]
 
 # -------------------------------------------------
@@ -163,7 +165,7 @@ final = pd.merge(
     how="left"
 ).sort_values("strike_price")
 
-# 🔥 NEW COLUMN
+# ✅ max pain − time 1
 final["mp_minus_time1"] = final["max_pain"] - final["value_time_1"]
 
 # -------------------------------------------------
@@ -187,7 +189,23 @@ for col in final.columns:
     final[col] = final[col].round(0).astype("Int64")
 
 # -------------------------------------------------
-# DISPLAY
+# FIND ATM STRIKES
+# -------------------------------------------------
+lower_strike = None
+upper_strike = None
+
+if price_btc:
+    strikes = final["strike_price"].dropna().astype(float).tolist()
+    lower = [s for s in strikes if s <= price_btc]
+    upper = [s for s in strikes if s >= price_btc]
+
+    if lower:
+        lower_strike = max(lower)
+    if upper:
+        upper_strike = min(upper)
+
+# -------------------------------------------------
+# STYLING
 # -------------------------------------------------
 def color_change(v):
     if pd.isna(v):
@@ -198,14 +216,26 @@ def color_change(v):
         return "background-color: lightcoral"
     return ""
 
+def highlight_atm(row):
+    styles = [""] * len(row)
+    if row["strike_price"] in (lower_strike, upper_strike):
+        styles[0] = "background-color: #d6f0ff"
+        styles[1] = "background-color: #d6f0ff"
+    return styles
+
+# -------------------------------------------------
+# DISPLAY
+# -------------------------------------------------
 st.subheader(f"Comparison {t1} → {t2} + Live Max Pain")
 
 st.dataframe(
-    final.style.applymap(
-        color_change,
-        subset=["change", "mp_minus_time1"]
-    ),
+    final.style
+        .applymap(color_change, subset=["change", "mp_minus_time1"])
+        .apply(highlight_atm, axis=1),
     use_container_width=True
 )
 
-st.caption("🟢 Positive | 🔴 Negative | Live Max Pain • Auto-refresh 30s")
+st.caption(
+    "🔵 ATM Strikes | 🟢 Positive | 🔴 Negative | "
+    "Live Max Pain • Auto-refresh 30s"
+)
