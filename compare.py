@@ -219,8 +219,8 @@ def color_change(v):
 def highlight_atm(row):
     styles = [""] * len(row)
     if row["strike_price"] in (lower_strike, upper_strike):
-        styles[0] = "background-color: #d6f0ff"
-        styles[1] = "background-color: #d6f0ff"
+        styles[0] = "background-color: #ffb676"
+        styles[1] = "background-color: #ffb676"
     return styles
 
 # -------------------------------------------------
@@ -239,3 +239,4 @@ st.caption(
     "🔵 ATM Strikes | 🟢 Positive | 🔴 Negative | "
     "Live Max Pain • Auto-refresh 30s"
 )
+
