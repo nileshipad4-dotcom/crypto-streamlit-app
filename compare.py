@@ -92,7 +92,7 @@ df_t2 = (
 )
 
 merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-merged["change"] = merged["value_time_2"] - merged["value_time_1"]
+merged["change"] = merged["value_time_1"] - merged["value_time_2"]
 
 # -------------------------------------------------
 # FETCH LIVE OPTION CHAIN
@@ -190,3 +190,4 @@ st.dataframe(
 )
 
 st.caption("🟢 Increase | 🔴 Decrease | Live Max Pain • Auto-refresh 30s")
+
