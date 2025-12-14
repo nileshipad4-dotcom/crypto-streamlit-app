@@ -1,88 +1,95 @@
-# compare_oi.py
 import streamlit as st
 import pandas as pd
-import os
 
-st.set_page_config(page_title="Call OI Change Comparator", layout="wide")
+st.set_page_config(layout="wide")
+st.title("📊 Call OI Comparison Between Two Times (BTC.csv)")
 
-st.title("📊 Call OI Change — Strike-wise Comparison")
+# -------------------------------------------------
+# LOAD BTC.csv
+# -------------------------------------------------
+BTC_PATH = "data/BTC.csv"
+df = pd.read_csv(BTC_PATH)
 
-DATA_DIR = "data"  # adjust if your CSVs live elsewhere
+# -------------------------------------------------
+# COLUMN POSITIONS (LOCKED FROM YOUR CSV)
+# -------------------------------------------------
+STRIKE_COL_IDX = 6   # G:G
+CALL_OI_COL_IDX = 1  # B:B (call OI)
+TIMESTAMP_COL = next(
+    c for c in df.columns if "timestamp" in c.lower()
+)
 
-# Choose underlying
-underlying = st.selectbox("Select Underlying", ["BTC", "ETH"])
+# -------------------------------------------------
+# EXTRACT REQUIRED DATA
+# -------------------------------------------------
+df_extracted = pd.DataFrame({
+    "strike_price": pd.to_numeric(df.iloc[:, STRIKE_COL_IDX], errors="coerce"),
+    "call_oi": pd.to_numeric(df.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
+    "timestamp": df[TIMESTAMP_COL]
+})
 
-file_path = os.path.join(DATA_DIR, f"{underlying}.csv")
+# -------------------------------------------------
+# TIME SELECTION
+# -------------------------------------------------
+timestamps = sorted(df_extracted["timestamp"].dropna().unique())
 
-if not os.path.exists(file_path):
-    st.error(f"No data file found: {file_path}. Run the collector or check the path.")
-    st.stop()
-
-@st.cache_data(ttl=60)
-def load_df(path):
-    df = pd.read_csv(path)
-    # ensure columns exist and types
-    if "strike_price" in df.columns:
-        df["strike_price"] = pd.to_numeric(df["strike_price"], errors="coerce")
-    if "call_oi" in df.columns:
-        df["call_oi"] = pd.to_numeric(df["call_oi"], errors="coerce")
-    # keep only rows that have a timestamp
-    if "timestamp_IST" in df.columns:
-        df = df[df["timestamp_IST"].notna()]
-    return df
-
-df = load_df(file_path)
-
-timestamps = sorted(df["timestamp_IST"].unique())
-if len(timestamps) < 2:
-    st.warning("Not enough timestamps in data to compare. Wait for more collector runs.")
-    st.dataframe(df.head(10))
-    st.stop()
-
-# select times
-col1, col2 = st.columns(2)
-with col1:
-    t1 = st.selectbox("Time 1 (older)", timestamps, index=max(0, len(timestamps)-2))
-with col2:
-    t2 = st.selectbox("Time 2 (newer)", timestamps, index=len(timestamps)-1)
+t1 = st.selectbox("Select Time 1", timestamps, index=0)
+t2 = st.selectbox("Select Time 2", timestamps, index=1 if len(timestamps) > 1 else 0)
 
 if t1 == t2:
     st.warning("Please select two different timestamps.")
     st.stop()
 
-# filter and prepare
-df1 = df[df["timestamp_IST"] == t1][["strike_price", "call_oi"]].rename(columns={"call_oi": f"call_oi_{t1}"})
-df2 = df[df["timestamp_IST"] == t2][["strike_price", "call_oi"]].rename(columns={"call_oi": f"call_oi_{t2}"})
+# -------------------------------------------------
+# FILTER DATA FOR BOTH TIMES
+# -------------------------------------------------
+df_t1 = (
+    df_extracted[df_extracted["timestamp"] == t1]
+    .groupby("strike_price", as_index=False)["call_oi"]
+    .sum()
+    .rename(columns={"call_oi": "call_oi_time_1"})
+)
 
-merged = pd.merge(df1, df2, on="strike_price", how="outer").sort_values("strike_price").reset_index(drop=True)
-merged[f"OI_Change_{t2}_minus_{t1}"] = merged[f"call_oi_{t2}"] - merged[f"call_oi_{t1}"]
+df_t2 = (
+    df_extracted[df_extracted["timestamp"] == t2]
+    .groupby("strike_price", as_index=False)["call_oi"]
+    .sum()
+    .rename(columns={"call_oi": "call_oi_time_2"})
+)
 
-# present results
-st.subheader(f"Call OI change: {underlying} — {t1} → {t2}")
+# -------------------------------------------------
+# MERGE & COMPARE
+# -------------------------------------------------
+merged = pd.merge(
+    df_t1,
+    df_t2,
+    on="strike_price",
+    how="outer"
+).sort_values("strike_price")
 
-# add sorting / filters
-sort_by = st.selectbox("Sort by", [f"OI_Change_{t2}_minus_{t1}", "strike_price"], index=0)
-ascending = st.checkbox("Ascending", value=False)
+merged["call_oi_change"] = merged["call_oi_time_2"] - merged["call_oi_time_1"]
 
-display_df = merged.copy()
-display_df = display_df.sort_values(by=sort_by, ascending=ascending)
-
-# color styling
-def style_change(v):
-    if pd.isna(v):
+# -------------------------------------------------
+# COLOR FUNCTION
+# -------------------------------------------------
+def color_change(val):
+    if pd.isna(val):
         return ""
-    if v > 0:
-        return "background-color: #d4f4dd"  # light green
-    if v < 0:
-        return "background-color: #ffd8d8"  # light red
+    if val > 0:
+        return "background-color: lightgreen"
+    if val < 0:
+        return "background-color: lightcoral"
     return ""
 
-st.dataframe(display_df.style.applymap(style_change, subset=[f"OI_Change_{t2}_minus_{t1}"]), use_container_width=True)
+# -------------------------------------------------
+# DISPLAY
+# -------------------------------------------------
+st.subheader(f"Call OI Change: {t1} → {t2}")
 
-# totals summary
-total_t1 = merged[f"call_oi_{t1}"].sum(min_count=1)
-total_t2 = merged[f"call_oi_{t2}"].sum(min_count=1)
-total_change = total_t2 - total_t1
+st.dataframe(
+    merged.style.applymap(color_change, subset=["call_oi_change"]),
+    use_container_width=True
+)
 
-st.markdown("---")
-st.write(f"Total Call OI at {t1}: {total_t1:.0f}  •  at {t2}: {total_t2:.0f}  •  Change: {total_change:.0f}")
+st.caption("🟢 Increase in Call OI | 🔴 Decrease in Call OI")
+
