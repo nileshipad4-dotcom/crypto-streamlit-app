@@ -124,7 +124,7 @@ def compute_max_pain(df):
         R = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
         S = -sum(M[:i] * L[:i])
         T = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-        U.append(round((Q + R + S + T) / 10000))
+        U.append(round((Q + R + S + T) / 10000, 8))
 
     df["max_pain"] = U
     return df
@@ -163,15 +163,21 @@ df = compute_max_pain(df)
 # Add timestamp
 df["timestamp_IST"] = get_ist_time()
 
-# Save live CSV
+# Save live CSV (RAW values)
 os.makedirs("live", exist_ok=True)
 df.to_csv(f"live/{selected_underlying}_live.csv", index=False)
 
 # -------------------
-# DISPLAY
+# DISPLAY (8 DECIMALS EXCEPT STRIKE)
 # -------------------
+df_display = df.copy()
+
+for col in df_display.columns:
+    if col != "strike_price" and pd.api.types.is_numeric_dtype(df_display[col]):
+        df_display[col] = df_display[col].map(lambda x: f"{x:.8f}" if pd.notna(x) else "")
+
 st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
-st.dataframe(df, use_container_width=True)
+st.dataframe(df_display, use_container_width=True)
 
 if download_raw:
     st.download_button(
