@@ -113,9 +113,9 @@ df_live_raw = fetch_live_chain()
 # -------------------------------------------------
 # FORMAT LIVE DATA
 # -------------------------------------------------
-df_live = df_live_raw[[
-    "strike_price", "contract_type", "mark_price", "oi_contracts"
-]].copy()
+df_live = df_live_raw[
+    ["strike_price", "contract_type", "mark_price", "oi_contracts"]
+].copy()
 
 for c in ["strike_price", "mark_price", "oi_contracts"]:
     df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
@@ -154,7 +154,7 @@ def compute_max_pain(df):
 df_live_mp = compute_max_pain(live)
 
 # -------------------------------------------------
-# MERGE + REORDER COLUMNS
+# MERGE + ADD NEW DIFFERENCE COLUMN
 # -------------------------------------------------
 final = pd.merge(
     merged,
@@ -163,12 +163,25 @@ final = pd.merge(
     how="left"
 ).sort_values("strike_price")
 
+# 🔥 NEW COLUMN
+final["mp_minus_time1"] = final["max_pain"] - final["value_time_1"]
+
+# -------------------------------------------------
+# COLUMN ORDER
+# -------------------------------------------------
 final = final[
-    ["strike_price", "max_pain", "value_time_1", "value_time_2", "change"]
+    [
+        "strike_price",
+        "max_pain",
+        "mp_minus_time1",
+        "value_time_1",
+        "value_time_2",
+        "change",
+    ]
 ]
 
 # -------------------------------------------------
-# REMOVE DECIMALS (INT DISPLAY)
+# REMOVE DECIMALS
 # -------------------------------------------------
 for col in final.columns:
     final[col] = final[col].round(0).astype("Int64")
@@ -177,17 +190,22 @@ for col in final.columns:
 # DISPLAY
 # -------------------------------------------------
 def color_change(v):
-    if pd.isna(v): return ""
-    if v > 0: return "background-color: lightgreen"
-    if v < 0: return "background-color: lightcoral"
+    if pd.isna(v):
+        return ""
+    if v > 0:
+        return "background-color: lightgreen"
+    if v < 0:
+        return "background-color: lightcoral"
     return ""
 
 st.subheader(f"Comparison {t1} → {t2} + Live Max Pain")
 
 st.dataframe(
-    final.style.applymap(color_change, subset=["change"]),
+    final.style.applymap(
+        color_change,
+        subset=["change", "mp_minus_time1"]
+    ),
     use_container_width=True
 )
 
-st.caption("🟢 Increase | 🔴 Decrease | Live Max Pain • Auto-refresh 30s")
-
+st.caption("🟢 Positive | 🔴 Negative | Live Max Pain • Auto-refresh 30s")
