@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # PAGE CONFIG
 # =================================================
 st.set_page_config(layout="wide")
-st.title("📊 Strike-wise Comparison + Live Data (BTC)")
+st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # =================================================
 # AUTO REFRESH (30s)
@@ -21,22 +21,26 @@ except:
 # =================================================
 # CONFIG
 # =================================================
-BTC_PATH = "data/BTC.csv"
+API_BASE = "https://api.india.delta.exchange/v2/tickers"
+EXPIRY = "15-12-2025"
 
 STRIKE_COL_IDX = 6
 VALUE_COL_IDX = 19
 TIMESTAMP_COL_IDX = 14
 
-API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "15-12-2025"
+# =================================================
+# UNDERLYING TOGGLE
+# =================================================
+underlying = st.sidebar.selectbox("Underlying", ["BTC", "ETH"])
+DATA_PATH = f"data/{underlying}.csv"
 
 # =================================================
-# IST TIME
+# IST TIME (HH:MM ONLY)
 # =================================================
-def get_ist_time():
-    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
+def get_ist_time_hhmm():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
-current_time_label = get_ist_time()
+current_time_label = get_ist_time_hhmm()
 
 # =================================================
 # LIVE PRICE
@@ -45,21 +49,22 @@ current_time_label = get_ist_time()
 def get_delta_price(symbol):
     try:
         r = requests.get(API_BASE, timeout=10).json()["result"]
-        sym = "BTCUSD" if symbol == "BTC" else "ETHUSD"
+        sym = f"{symbol}USD"
         return float(next(x for x in r if x["symbol"] == sym)["mark_price"])
     except:
         return None
 
-price_btc = get_delta_price("BTC")
-price_eth = get_delta_price("ETH")
+price = get_delta_price(underlying)
 
-st.sidebar.metric("BTC Price (Delta)", f"{int(price_btc):,}" if price_btc else "Error")
-st.sidebar.metric("ETH Price (Delta)", f"{int(price_eth):,}" if price_eth else "Error")
+st.sidebar.metric(
+    f"{underlying} Price (Delta)",
+    f"{int(price):,}" if price else "Error"
+)
 
 # =================================================
-# LOAD BTC.csv
+# LOAD CSV
 # =================================================
-df_raw = pd.read_csv(BTC_PATH)
+df_raw = pd.read_csv(DATA_PATH)
 
 df = pd.DataFrame({
     "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
@@ -73,7 +78,7 @@ df = pd.DataFrame({
 timestamps = sorted(df["timestamp"].unique())
 
 if len(timestamps) < 2:
-    st.error("Not enough timestamps in BTC.csv")
+    st.error("Not enough timestamps")
     st.stop()
 
 t1 = st.selectbox("Select Time 1", timestamps, index=0)
@@ -84,7 +89,7 @@ if t1 == t2:
     st.stop()
 
 # =================================================
-# DATA FOR BOTH TIMES
+# HISTORICAL DATA
 # =================================================
 df_t1 = (
     df[df["timestamp"] == t1]
@@ -101,18 +106,17 @@ df_t2 = (
 )
 
 merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-
 merged["change"] = merged[t1] - merged[t2]
 
 # =================================================
-# FETCH LIVE OPTION CHAIN
+# LIVE OPTION CHAIN
 # =================================================
 @st.cache_data(ttl=30)
 def fetch_live_chain():
     url = (
         f"{API_BASE}"
         f"?contract_types=call_options,put_options"
-        f"&underlying_asset_symbols=BTC"
+        f"&underlying_asset_symbols={underlying}"
         f"&expiry_date={EXPIRY}"
     )
     r = requests.get(url, timeout=20).json()["result"]
@@ -120,9 +124,6 @@ def fetch_live_chain():
 
 df_live_raw = fetch_live_chain()
 
-# =================================================
-# FORMAT LIVE DATA
-# =================================================
 df_live = df_live_raw[
     ["strike_price", "contract_type", "mark_price", "oi_contracts"]
 ].copy()
@@ -141,7 +142,7 @@ live = pd.merge(
 )
 
 # =================================================
-# COMPUTE LIVE VALUE (MAX PAIN LOGIC)
+# LIVE CALCULATION (MAX PAIN LOGIC)
 # =================================================
 def compute_live_value(df):
     A = df["call_mark"].fillna(0).values
@@ -161,23 +162,20 @@ def compute_live_value(df):
     df[current_time_label] = out
     return df[["strike_price", current_time_label]]
 
-df_live_value = compute_live_value(live)
+df_live_val = compute_live_value(live)
 
 # =================================================
-# MERGE ALL
+# FINAL MERGE
 # =================================================
 final = pd.merge(
     merged,
-    df_live_value,
+    df_live_val,
     on="strike_price",
     how="left"
 ).sort_values("strike_price")
 
 final[f"{current_time_label} - {t1}"] = final[current_time_label] - final[t1]
 
-# =================================================
-# COLUMN ORDER
-# =================================================
 final = final[
     [
         "strike_price",
@@ -189,11 +187,22 @@ final = final[
     ]
 ]
 
+for c in final.columns:
+    final[c] = final[c].round(0).astype("Int64")
+
 # =================================================
-# INTEGER DISPLAY
+# ATM STRIKE DETECTION
 # =================================================
-for col in final.columns:
-    final[col] = final[col].round(0).astype("Int64")
+lower_strike = upper_strike = None
+
+if price:
+    strikes = final["strike_price"].dropna().astype(float).tolist()
+    lower = [s for s in strikes if s <= price]
+    upper = [s for s in strikes if s >= price]
+    if lower:
+        lower_strike = max(lower)
+    if upper:
+        upper_strike = min(upper)
 
 # =================================================
 # STYLING
@@ -204,17 +213,25 @@ def color_change(v):
     if v < 0: return "background-color: lightcoral"
     return ""
 
-st.subheader(f"Live vs {t1} vs {t2}")
+def highlight_atm(row):
+    styles = [""] * len(row)
+    if row["strike_price"] in (lower_strike, upper_strike):
+        styles[0] = "background-color: #ffd6e8"  # light pink
+    return styles
+
+# =================================================
+# DISPLAY
+# =================================================
+st.subheader(f"{underlying} — Live ({current_time_label}) vs {t1} vs {t2}")
 
 st.dataframe(
-    final.style.applymap(
-        color_change,
-        subset=[f"{current_time_label} - {t1}", "change"]
-    ),
+    final.style
+        .applymap(color_change, subset=["change", f"{current_time_label} - {t1}"])
+        .apply(highlight_atm, axis=1),
     use_container_width=True
 )
 
 st.caption(
-    "🟢 Positive | 🔴 Negative | "
-    "Live column shows current time snapshot • Auto-refresh 30s"
+    "🌸 ATM strikes highlighted | 🟢 Positive | 🔴 Negative | "
+    "Live snapshot (HH:MM) • Auto-refresh 30s"
 )
