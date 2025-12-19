@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -28,9 +27,13 @@ UNDERLYING = st.sidebar.selectbox("Underlying", ["BTC", "ETH"])
 CSV_PATH = f"data/{UNDERLYING}.csv"
 
 # CSV column indices (0-based)
-STRIKE_COL_IDX = 6      # strike_price
-VALUE_COL_IDX = 19     # column to compare
-TIMESTAMP_COL_IDX = 14 # timestamp_IST
+STRIKE_COL_IDX = 6
+VALUE_COL_IDX = 19
+TIMESTAMP_COL_IDX = 14
+CALL_GAMMA_COL_IDX = 20
+PUT_GAMMA_COL_IDX = 21
+
+GAMMA_FACTOR = 100_000_000
 
 # -------------------------------------------------
 # LIVE PRICE
@@ -45,6 +48,7 @@ def get_delta_price(symbol):
         return None
 
 price = get_delta_price(UNDERLYING)
+
 st.sidebar.metric(
     f"{UNDERLYING} Price (Delta)",
     f"{int(price):,}" if price else "Error"
@@ -58,11 +62,13 @@ df_raw = pd.read_csv(CSV_PATH)
 df = pd.DataFrame({
     "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
     "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
-    "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]  # HH:MM
+    "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
+    "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
+    "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
 }).dropna(subset=["strike_price", "timestamp"])
 
 # -------------------------------------------------
-# TIME SELECTION (LATEST FIRST)
+# TIME SELECTION
 # -------------------------------------------------
 timestamps = sorted(df["timestamp"].unique(), reverse=True)
 
@@ -78,26 +84,40 @@ if t1 == t2:
     st.stop()
 
 # -------------------------------------------------
-# DATA FOR BOTH TIMES
+# VALUE COMPARISON
 # -------------------------------------------------
 df_t1 = (
     df[df["timestamp"] == t1]
     .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"value": f"{t1}"})
+    .rename(columns={"value": t1})
 )
 
 df_t2 = (
     df[df["timestamp"] == t2]
     .groupby("strike_price", as_index=False)["value"]
     .sum()
-    .rename(columns={"value": f"{t2}"})
+    .rename(columns={"value": t2})
 )
 
 merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-
-# Change = Time1 − Time2
 merged["Change"] = merged[t1] - merged[t2]
+
+# -------------------------------------------------
+# GAMMA AT TIME-1
+# -------------------------------------------------
+gamma_t1 = (
+    df[df["timestamp"] == t1]
+    .groupby("strike_price", as_index=False)
+    .agg({
+        "call_gamma": "sum",
+        "put_gamma": "sum"
+    })
+    .rename(columns={
+        "call_gamma": "call_gamma_t1",
+        "put_gamma": "put_gamma_t1"
+    })
+)
 
 # -------------------------------------------------
 # FETCH LIVE OPTION CHAIN
@@ -115,25 +135,52 @@ def fetch_live_chain():
     )
 
 df_live = fetch_live_chain()[[
-    "strike_price", "contract_type", "mark_price", "oi_contracts"
-]]
+    "strike_price",
+    "contract_type",
+    "mark_price",
+    "oi_contracts",
+    "greeks.gamma"
+]].rename(columns={"greeks.gamma": "gamma"})
 
-for c in ["strike_price", "mark_price", "oi_contracts"]:
+for c in ["strike_price", "gamma"]:
     df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
 
-calls = df_live[df_live["contract_type"] == "call_options"]
-puts  = df_live[df_live["contract_type"] == "put_options"]
-
-live = pd.merge(
-    calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-    puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
-    on="strike_price",
-    how="outer"
+calls = (
+    df_live[df_live["contract_type"] == "call_options"]
+    .groupby("strike_price", as_index=False)["gamma"]
+    .sum()
+    .rename(columns={"gamma": "call_gamma_live"})
 )
+
+puts = (
+    df_live[df_live["contract_type"] == "put_options"]
+    .groupby("strike_price", as_index=False)["gamma"]
+    .sum()
+    .rename(columns={"gamma": "put_gamma_live"})
+)
+
+live_gamma = pd.merge(calls, puts, on="strike_price", how="outer")
 
 # -------------------------------------------------
 # COMPUTE LIVE MAX PAIN
 # -------------------------------------------------
+df_live_mp = fetch_live_chain()[[
+    "strike_price", "contract_type", "mark_price", "oi_contracts"
+]]
+
+for c in ["strike_price", "mark_price", "oi_contracts"]:
+    df_live_mp[c] = pd.to_numeric(df_live_mp[c], errors="coerce")
+
+calls_mp = df_live_mp[df_live_mp["contract_type"] == "call_options"]
+puts_mp  = df_live_mp[df_live_mp["contract_type"] == "put_options"]
+
+live_mp = pd.merge(
+    calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+    puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+    on="strike_price",
+    how="outer"
+)
+
 def compute_max_pain(df):
     A = df["call_mark"].fillna(0).values
     B = df["call_oi"].fillna(0).values
@@ -152,24 +199,39 @@ def compute_max_pain(df):
     df["Current"] = mp
     return df[["strike_price", "Current"]]
 
-live_mp = compute_max_pain(live)
+live_mp = compute_max_pain(live_mp)
 
 # -------------------------------------------------
 # FINAL MERGE
 # -------------------------------------------------
-final = pd.merge(merged, live_mp, on="strike_price", how="left")
+final = (
+    merged
+    .merge(live_mp, on="strike_price", how="left")
+    .merge(gamma_t1, on="strike_price", how="left")
+    .merge(live_gamma, on="strike_price", how="left")
+)
+
 final["Current − Time1"] = final["Current"] - final[t1]
 
-final = final[
-    ["strike_price", "Current", "Current − Time1", t1, t2, "Change"]
-].sort_values("strike_price")
+final["Call Γ Δ"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * GAMMA_FACTOR
+final["Put Γ Δ"]  = (final["put_gamma_live"]  - final["put_gamma_t1"])  * GAMMA_FACTOR
 
-# Remove decimals
+final = final[[
+    "strike_price",
+    "Current",
+    "Current − Time1",
+    "Call Γ Δ",
+    "Put Γ Δ",
+    t1,
+    t2,
+    "Change"
+]].sort_values("strike_price")
+
 for c in final.columns:
     final[c] = final[c].round(0).astype("Int64")
 
 # -------------------------------------------------
-# FIND ATM RANGE
+# ATM RANGE
 # -------------------------------------------------
 lower_strike = upper_strike = None
 if price:
@@ -201,13 +263,12 @@ st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
 
 st.dataframe(
     final.style
-        .applymap(color_values, subset=["Change", "Current − Time1"])
+        .applymap(color_values, subset=["Change", "Current − Time1", "Call Γ Δ", "Put Γ Δ"])
         .apply(highlight_price_range, axis=1),
     use_container_width=True
 )
 
 st.caption(
-    "🌸 Price Range | 🟢 Positive | 🔴 Negative | "
-    "Live snapshot refreshes every 30 seconds"
+    "🌸 ATM | 🟢 Positive | 🔴 Negative | "
+    "Gamma Δ scaled × 100,000,000 | Live refresh 30s"
 )
-
