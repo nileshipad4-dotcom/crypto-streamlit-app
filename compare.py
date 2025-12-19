@@ -344,10 +344,9 @@ st.dataframe(
         mp_cur: st.column_config.NumberColumn(mp_cur, pinned=True),
         f"MP ({t1})": st.column_config.NumberColumn(f"MP ({t1})", pinned=True),
         "△ MP 1": st.column_config.NumberColumn("△ MP 1", pinned=True),
-        "ΔΔ MP 1": st.column_config.NumberColumn("ΔΔ MP 1", pinned=True),
-
-    },
+         },
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
