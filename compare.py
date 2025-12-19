@@ -225,14 +225,14 @@ final = (
 final["Current − Time1"] = final["Current"] - final[t1]
 
 # ---- GREEK DELTAS (LAST COLUMNS) ----
-final["Call Gamma △"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * FACTOR
-final["Put Gamma △"]  = (final["put_gamma_live"]  - final["put_gamma_t1"])  * FACTOR
+final["Call Gamma △"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * FACTOR / 10
+final["Put Gamma △"]  = (final["put_gamma_live"]  - final["put_gamma_t1"])  * FACTOR / 10
 
-final["Call Delta △"] = (final["call_delta_live"] - final["call_delta_t1"]) * FACTOR
-final["Put Delta △"]  = (final["put_delta_live"]  - final["put_delta_t1"])  * FACTOR
+final["Call Delta △"] = (final["call_delta_live"] - final["call_delta_t1"]) * FACTOR / 100000
+final["Put Delta △"]  = (final["put_delta_live"]  - final["put_delta_t1"])  * FACTOR / 100000
 
-final["Call Vega △"]  = (final["call_vega_live"]  - final["call_vega_t1"])  * FACTOR
-final["Put Vega △"]   = (final["put_vega_live"]   - final["put_vega_t1"])   * FACTOR
+final["Call Vega △"]  = (final["call_vega_live"]  - final["call_vega_t1"])  * FACTOR / 1000000
+final["Put Vega △"]   = (final["put_vega_live"]   - final["put_vega_t1"])   * FACTOR / 1000000
 
 # -------------------------------------------------
 # FINAL ORDER
@@ -257,3 +257,4 @@ st.caption(
     "△ = Live − Time1 | Scaled × 100,000,000 | "
     "Live max pain sorted correctly"
 )
+
