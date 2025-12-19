@@ -285,7 +285,7 @@ if price:
 
 def highlight_atm(row):
     if row["strike_price"] in (atm_low, atm_high):
-        return ["background-color: #add8e6"] * len(row)
+        return ["background-color: #000435"] * len(row)
     return [""] * len(row)
 
 # -------------------------------------------------
@@ -308,4 +308,5 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
