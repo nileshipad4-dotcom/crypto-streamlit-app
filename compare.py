@@ -22,7 +22,7 @@ except:
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "15-12-2025"
+EXPIRY = "20-12-2025"
 
 UNDERLYING = st.sidebar.selectbox("Underlying", ["BTC", "ETH"])
 CSV_PATH = f"data/{UNDERLYING}.csv"
@@ -210,3 +210,4 @@ st.caption(
     "🌸 Price Range | 🟢 Positive | 🔴 Negative | "
     "Live snapshot refreshes every 30 seconds"
 )
+
