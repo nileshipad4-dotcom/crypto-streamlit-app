@@ -268,20 +268,43 @@ final = final[[
 ]].round(0)
 
 # -------------------------------------------------
+# -------------------------------------------------
+# ATM HIGHLIGHT LOGIC
+# -------------------------------------------------
+mp_cur = f"MP ({now_ts})"
+
+atm_low = atm_high = None
+if price:
+    strikes = final["strike_price"].astype(float).tolist()
+    below = [s for s in strikes if s <= price]
+    above = [s for s in strikes if s >= price]
+    if below:
+        atm_low = max(below)
+    if above:
+        atm_high = min(above)
+
+def highlight_atm(row):
+    if row["strike_price"] in (atm_low, atm_high):
+        return ["background-color: #fff4cc"] * len(row)
+    return [""] * len(row)
+
+# -------------------------------------------------
 # DISPLAY
 # -------------------------------------------------
 st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
 
+styled = final.style.apply(highlight_atm, axis=1)
+
 st.dataframe(
-    final,
+    styled,
     use_container_width=True,
     height=700,
     column_config={
         "strike_price": st.column_config.NumberColumn("Strike", pinned=True),
-        f"MP ({now_ts})": st.column_config.NumberColumn(f"MP ({now_ts})", pinned=True),
+        mp_cur: st.column_config.NumberColumn(mp_cur, pinned=True),
         f"MP ({t1})": st.column_config.NumberColumn(f"MP ({t1})", pinned=True),
         "△ MP 1": st.column_config.NumberColumn("△ MP 1", pinned=True),
     },
 )
 
-st.caption("MP = Max Pain | △ = Live − Time1 | PCR shown above")
+st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
