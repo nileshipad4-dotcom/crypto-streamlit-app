@@ -317,6 +317,53 @@ def highlight_rows(row):
 # -------------------------------------------------
 # DISPLAY
 # -------------------------------------------------
+# -------------------------------------------------
+# FORMATTING LOGIC
+# -------------------------------------------------
+mp_cur = f"MP ({now_ts})"
+mp_t1  = f"MP ({t1})"
+mp_t2  = f"MP ({t2})"
+
+# ---- ATM STRIKES ----
+atm_low = atm_high = None
+if price:
+    strikes = final["strike_price"].astype(float).tolist()
+    below = [s for s in strikes if s <= price]
+    above = [s for s in strikes if s >= price]
+    if below: atm_low = max(below)
+    if above: atm_high = min(above)
+
+# ---- LOWEST MP (GLOBAL) ----
+final["_min_mp"] = final[[mp_cur, mp_t1, mp_t2]].min(axis=1)
+lowest_mp_strike = final.loc[final["_min_mp"].idxmin(), "strike_price"]
+
+# ---- STYLING FUNCTION ----
+def highlight_rows(row):
+    styles = [""] * len(row)
+
+    strike = row["strike_price"]
+
+    # Priority 1: Lowest MP
+    if strike == lowest_mp_strike:
+        return ["background-color: #e6d9ff"] * len(row)
+
+    # Priority 2: All MP negative
+    if (
+        row[mp_cur] < 0 and
+        row[mp_t1] < 0 and
+        row[mp_t2] < 0
+    ):
+        return ["background-color: #ffd6d6"] * len(row)
+
+    # Priority 3: ATM band
+    if strike in (atm_low, atm_high):
+        return ["background-color: #fff4cc"] * len(row)
+
+    return styles
+
+# -------------------------------------------------
+# DISPLAY
+# -------------------------------------------------
 st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
 
 styled = (
@@ -342,5 +389,3 @@ st.caption(
     "🟡 ATM band | 🔴 MP < 0 at all times | 🟣 Lowest MP overall | "
     "MP = Max Pain | △ = Live − Time1"
 )
-
-
