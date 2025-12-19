@@ -90,7 +90,23 @@ df = pd.DataFrame({
 # -------------------------------------------------
 # TIME SELECTION
 # -------------------------------------------------
-timestamps = sorted(df["timestamp"].unique(), reverse=True)
+from datetime import time
+
+def rotated_time_sort(times, pivot="17:30"):
+    pivot_h, pivot_m = map(int, pivot.split(":"))
+    pivot_minutes = pivot_h * 60 + pivot_m
+
+    def key(t):
+        h, m = map(int, t.split(":"))
+        total = h * 60 + m
+        # rotate around pivot
+        return (total - pivot_minutes) % (24 * 60)
+
+    # sort descending AFTER rotation
+    return sorted(times, key=key, reverse=True)
+
+timestamps = rotated_time_sort(df["timestamp"].unique(), pivot="17:30")
+
 t1 = st.selectbox("Select Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Select Time 2 (Previous)", timestamps, index=1)
 
@@ -348,5 +364,6 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
