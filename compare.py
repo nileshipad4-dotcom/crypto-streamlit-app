@@ -95,22 +95,6 @@ t1 = st.selectbox("Select Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Select Time 2 (Previous)", timestamps, index=1)
 
 # -------------------------------------------------
-# PCR FROM CSV SNAPSHOTS
-# -------------------------------------------------
-def compute_pcr(snapshot_df):
-    call_oi = snapshot_df["call_oi"].sum()
-    put_oi  = snapshot_df["put_oi"].sum()
-    call_v  = snapshot_df["call_vol"].sum()
-    put_v   = snapshot_df["put_vol"].sum()
-    return (
-        put_oi / call_oi if call_oi else None,
-        put_v  / call_v  if call_v  else None
-    )
-
-pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
-pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
-
-# -------------------------------------------------
 # FETCH LIVE OPTION CHAIN
 # -------------------------------------------------
 @st.cache_data(ttl=30)
@@ -126,35 +110,6 @@ def fetch_live_chain():
 df_live = fetch_live_chain()
 
 # -------------------------------------------------
-# LIVE PCR
-# -------------------------------------------------
-df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
-df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
-
-call_oi_live  = df_live.loc[df_live["contract_type"] == "call_options", "oi_contracts"].sum()
-put_oi_live   = df_live.loc[df_live["contract_type"] == "put_options",  "oi_contracts"].sum()
-call_vol_live = df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum()
-put_vol_live  = df_live.loc[df_live["contract_type"] == "put_options",  "volume"].sum()
-
-pcr_live_oi  = put_oi_live / call_oi_live if call_oi_live else None
-pcr_live_vol = put_vol_live / call_vol_live if call_vol_live else None
-
-# -------------------------------------------------
-# PCR TABLE
-# -------------------------------------------------
-pcr_table = pd.DataFrame(
-    {
-        "Current": [pcr_live_oi, pcr_live_vol],
-        t1:        [pcr_t1_oi,   pcr_t1_vol],
-        t2:        [pcr_t2_oi,   pcr_t2_vol],
-    },
-    index=["PCR OI", "PCR Volume"]
-).applymap(lambda x: f"{x:.3f}" if pd.notna(x) else "NA")
-
-st.subheader(f"{UNDERLYING} PCR Snapshot")
-st.dataframe(pcr_table, use_container_width=True)
-
-# -------------------------------------------------
 # HISTORICAL MAX PAIN
 # -------------------------------------------------
 df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
@@ -164,7 +119,7 @@ merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
 merged["Change"] = merged[t1] - merged[t2]
 
 # -------------------------------------------------
-# LIVE MAX PAIN (CORRECT)
+# LIVE MAX PAIN
 # -------------------------------------------------
 df_mp = df_live[["strike_price","contract_type","mark_price","oi_contracts"]].copy()
 for c in ["strike_price","mark_price","oi_contracts"]:
@@ -189,8 +144,12 @@ def compute_max_pain(df):
     )
     mp=[]
     for i in range(len(df)):
-        mp.append(round(( -sum(A[i:]*B[i:]) + G[i]*sum(B[:i]) - sum(G[:i]*B[:i])
-                         -sum(M[:i]*L[:i]) + sum(G[i:]*L[i:]) - G[i]*sum(L[i:]) )/10000))
+        mp.append(round((
+            -sum(A[i:]*B[i:]) +
+            G[i]*sum(B[:i]) - sum(G[:i]*B[:i]) -
+            sum(M[:i]*L[:i]) +
+            sum(G[i:]*L[i:]) - G[i]*sum(L[i:])
+        )/10000))
     df["Current"] = mp
     return df[["strike_price","Current"]]
 
@@ -215,10 +174,22 @@ final = final.rename(columns={
     "Change": "△ MP 2"
 })
 
+# -------------------------------------------------
+# 🔴 CRITICAL FIX — REASSERT COLUMN ORDER 🔴
+# -------------------------------------------------
+final = final[[
+    "strike_price",
+    f"MP ({now_ts})",
+    f"MP ({t1})",
+    "△ MP 1",
+    f"MP ({t2})",
+    "△ MP 2",
+]]
+
 final = final.round(0)
 
 # -------------------------------------------------
-# DISPLAY MAIN TABLE
+# DISPLAY
 # -------------------------------------------------
 st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
 
@@ -234,4 +205,4 @@ st.dataframe(
     },
 )
 
-st.caption("MP = Max Pain | △ = Delta | PCR shown above")
+st.caption("MP = Max Pain | △ = Delta | Column order locked")
