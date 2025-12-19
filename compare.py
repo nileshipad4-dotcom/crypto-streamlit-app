@@ -293,23 +293,27 @@ lowest_mp_strike = final.loc[final["_min_mp"].idxmin(), "strike_price"]
 # ---- STYLING FUNCTION ----
 def highlight_rows(row):
     styles = [""] * len(row)
-
     strike = row["strike_price"]
 
-    # Priority 1: Lowest MP
+    # force numeric conversion (CRITICAL FIX)
+    try:
+        v_cur = pd.to_numeric(row[mp_cur], errors="coerce")
+        v_t1  = pd.to_numeric(row[mp_t1],  errors="coerce")
+        v_t2  = pd.to_numeric(row[mp_t2],  errors="coerce")
+    except Exception:
+        return styles
+
+    # ---------- PRIORITY 1: LOWEST MP ----------
     if strike == lowest_mp_strike:
         return ["background-color: #e6d9ff"] * len(row)
 
-    # Priority 2: All MP negative
-    if (
-        row[mp_cur] < 0 and
-        row[mp_t1] < 0 and
-        row[mp_t2] < 0
-    ):
-        return ["background-color: #ffd6d6"] * len(row)
+    # ---------- PRIORITY 2: ALL NEGATIVE ----------
+    if pd.notna(v_cur) and pd.notna(v_t1) and pd.notna(v_t2):
+        if v_cur < 0 and v_t1 < 0 and v_t2 < 0:
+            return ["background-color: #ffd6d6"] * len(row)
 
-    # Priority 3: ATM band
-    if strike in (atm_low, atm_high):
+    # ---------- PRIORITY 3: ATM BAND ----------
+    if strike == atm_low or strike == atm_high:
         return ["background-color: #fff4cc"] * len(row)
 
     return styles
@@ -386,3 +390,4 @@ st.dataframe(
 st.caption(
     "🟡 ATM band | 🔴 MP < 0 at all timestamps | 🟣 Lowest MP overall"
 )
+
