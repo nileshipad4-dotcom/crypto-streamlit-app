@@ -265,7 +265,7 @@ final = final[[
     "Call Gamma △","Put Gamma △",
     "Call Delta △","Put Delta △",
     "Call Vega △","Put Vega △"
-]].round(0)
+]].round(0).astype("Int64")
 
 # -------------------------------------------------
 # -------------------------------------------------
@@ -308,5 +308,6 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
