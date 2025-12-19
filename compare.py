@@ -270,124 +270,18 @@ final = final[[
 # -------------------------------------------------
 # DISPLAY
 # -------------------------------------------------
-# -------------------------------------------------
-# FORMATTING LOGIC
-# -------------------------------------------------
-mp_cur = f"MP ({now_ts})"
-mp_t1  = f"MP ({t1})"
-mp_t2  = f"MP ({t2})"
-
-# ---- ATM STRIKES ----
-atm_low = atm_high = None
-if price:
-    strikes = final["strike_price"].astype(float).tolist()
-    below = [s for s in strikes if s <= price]
-    above = [s for s in strikes if s >= price]
-    if below: atm_low = max(below)
-    if above: atm_high = min(above)
-
-# ---- LOWEST MP (GLOBAL) ----
-final["_min_mp"] = final[[mp_cur, mp_t1, mp_t2]].min(axis=1)
-lowest_mp_strike = final.loc[final["_min_mp"].idxmin(), "strike_price"]
-
-# ---- STYLING FUNCTION ----
-def highlight_rows(row):
-    styles = [""] * len(row)
-    strike = row["strike_price"]
-
-    # force numeric conversion (CRITICAL FIX)
-    try:
-        v_cur = pd.to_numeric(row[mp_cur], errors="coerce")
-        v_t1  = pd.to_numeric(row[mp_t1],  errors="coerce")
-        v_t2  = pd.to_numeric(row[mp_t2],  errors="coerce")
-    except Exception:
-        return styles
-
-    # ---------- PRIORITY 1: LOWEST MP ----------
-    if strike == lowest_mp_strike:
-        return ["background-color: #e6d9ff"] * len(row)
-
-    # ---------- PRIORITY 2: ALL NEGATIVE ----------
-    if pd.notna(v_cur) and pd.notna(v_t1) and pd.notna(v_t2):
-        if v_cur < 0 and v_t1 < 0 and v_t2 < 0:
-            return ["background-color: #ffd6d6"] * len(row)
-
-    # ---------- PRIORITY 3: ATM BAND ----------
-    if strike == atm_low or strike == atm_high:
-        return ["background-color: #fff4cc"] * len(row)
-
-    return styles
-
-# -------------------------------------------------
-# FORMATTING LOGIC (FIXED)
-# -------------------------------------------------
-mp_cur = f"MP ({now_ts})"
-mp_t1  = f"MP ({t1})"
-mp_t2  = f"MP ({t2})"
-
-# ---- ATM STRIKES ----
-atm_low = atm_high = None
-if price:
-    strikes = final["strike_price"].astype(float).tolist()
-    below = [s for s in strikes if s <= price]
-    above = [s for s in strikes if s >= price]
-    if below: atm_low = max(below)
-    if above: atm_high = min(above)
-
-# ---- LOWEST MP (GLOBAL, NaN SAFE) ----
-final["_min_mp"] = final[[mp_cur, mp_t1, mp_t2]].min(axis=1, skipna=True)
-lowest_mp_strike = final.loc[final["_min_mp"].idxmin(), "strike_price"]
-
-# ---- STYLING FUNCTION (PRIORITY SAFE) ----
-def highlight_rows(row):
-    styles = [""] * len(row)
-    strike = row["strike_price"]
-
-    # extract MP values safely
-    v_cur = row[mp_cur]
-    v_t1  = row[mp_t1]
-    v_t2  = row[mp_t2]
-
-    # ---------- PRIORITY 1: LOWEST MP ----------
-    if strike == lowest_mp_strike:
-        return ["background-color: #e6d9ff"] * len(row)
-
-    # ---------- PRIORITY 2: ALL NEGATIVE ----------
-    if pd.notna(v_cur) and pd.notna(v_t1) and pd.notna(v_t2):
-        if v_cur < 0 and v_t1 < 0 and v_t2 < 0:
-            return ["background-color: #ffd6d6"] * len(row)
-
-    # ---------- PRIORITY 3: ATM BAND ----------
-    if strike == atm_low or strike == atm_high:
-        return ["background-color: #fff4cc"] * len(row)
-
-    return styles
-
-# -------------------------------------------------
-# DISPLAY
-# -------------------------------------------------
 st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
 
-styled = (
-    final
-    .drop(columns="_min_mp")
-    .style
-    .apply(highlight_rows, axis=1)
-)
-
 st.dataframe(
-    styled,
+    final,
     use_container_width=True,
     height=700,
     column_config={
         "strike_price": st.column_config.NumberColumn("Strike", pinned=True),
-        mp_cur: st.column_config.NumberColumn(mp_cur, pinned=True),
-        mp_t1: st.column_config.NumberColumn(mp_t1, pinned=True),
+        f"MP ({now_ts})": st.column_config.NumberColumn(f"MP ({now_ts})", pinned=True),
+        f"MP ({t1})": st.column_config.NumberColumn(f"MP ({t1})", pinned=True),
         "△ MP 1": st.column_config.NumberColumn("△ MP 1", pinned=True),
     },
 )
 
-st.caption(
-    "🟡 ATM band | 🔴 MP < 0 at all timestamps | 🟣 Lowest MP overall"
-)
-
+st.caption("MP = Max Pain | △ = Live − Time1 | PCR shown above")
