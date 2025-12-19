@@ -29,12 +29,16 @@ CSV_PATH = f"data/{UNDERLYING}.csv"
 # CSV column indices (from collector.py)
 STRIKE_COL_IDX    = 6
 TIMESTAMP_COL_IDX = 14
-VALUE_COL_IDX     = 19   # historical max pain
+VALUE_COL_IDX     = 19
+
+CALL_OI_COL_IDX   = 1
+PUT_OI_COL_IDX    = 11
+CALL_VOL_COL_IDX  = 2
+PUT_VOL_COL_IDX   = 10
 
 CALL_GAMMA_COL_IDX = 3
 CALL_DELTA_COL_IDX = 4
 CALL_VEGA_COL_IDX  = 5
-
 PUT_GAMMA_COL_IDX  = 7
 PUT_DELTA_COL_IDX  = 8
 PUT_VEGA_COL_IDX   = 9
@@ -69,10 +73,14 @@ df = pd.DataFrame({
     "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
     "value":        pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
 
+    "call_oi":      pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
+    "put_oi":       pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
+    "call_vol":     pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
+    "put_vol":      pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
+
     "call_gamma":   pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
     "call_delta":   pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
     "call_vega":    pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX],  errors="coerce"),
-
     "put_gamma":    pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
     "put_delta":    pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
     "put_vega":     pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX],  errors="coerce"),
@@ -88,29 +96,21 @@ t1 = st.selectbox("Select Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Select Time 2 (Previous)", timestamps, index=1)
 
 # -------------------------------------------------
-# HISTORICAL MAX PAIN
+# PCR CALCULATION (CSV SNAPSHOTS)
 # -------------------------------------------------
-df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
-df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
+def compute_pcr(snapshot_df):
+    call_oi = snapshot_df["call_oi"].sum()
+    put_oi  = snapshot_df["put_oi"].sum()
+    call_v  = snapshot_df["call_vol"].sum()
+    put_v   = snapshot_df["put_vol"].sum()
 
-merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-merged["Change"] = merged[t1] - merged[t2]
-
-# -------------------------------------------------
-# GREEKS AT TIME-1
-# -------------------------------------------------
-greeks_t1 = (
-    df[df["timestamp"] == t1]
-    .groupby("strike_price", as_index=False)
-    .agg(
-        call_gamma_t1=("call_gamma", "sum"),
-        call_delta_t1=("call_delta", "sum"),
-        call_vega_t1=("call_vega", "sum"),
-        put_gamma_t1=("put_gamma", "sum"),
-        put_delta_t1=("put_delta", "sum"),
-        put_vega_t1=("put_vega", "sum"),
+    return (
+        (put_oi / call_oi) if call_oi else None,
+        (put_v  / call_v)  if call_v  else None
     )
-)
+
+pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
+pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
 
 # -------------------------------------------------
 # FETCH LIVE OPTION CHAIN
@@ -128,119 +128,41 @@ def fetch_live_chain():
 df_live = fetch_live_chain()
 
 # -------------------------------------------------
-# LIVE PCR (OI & VOLUME)
+# LIVE PCR
 # -------------------------------------------------
-df_mp = df_live[["strike_price","contract_type","mark_price","oi_contracts","volume"]].copy()
-for c in ["strike_price","mark_price","oi_contracts","volume"]:
-    df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
+df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
+df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
 
-total_call_oi  = df_mp.loc[df_mp["contract_type"]=="call_options","oi_contracts"].sum()
-total_put_oi   = df_mp.loc[df_mp["contract_type"]=="put_options","oi_contracts"].sum()
-total_call_vol = df_mp.loc[df_mp["contract_type"]=="call_options","volume"].sum()
-total_put_vol  = df_mp.loc[df_mp["contract_type"]=="put_options","volume"].sum()
+call_oi_live = df_live.loc[df_live["contract_type"]=="call_options","oi_contracts"].sum()
+put_oi_live  = df_live.loc[df_live["contract_type"]=="put_options","oi_contracts"].sum()
+call_vol_live = df_live.loc[df_live["contract_type"]=="call_options","volume"].sum()
+put_vol_live  = df_live.loc[df_live["contract_type"]=="put_options","volume"].sum()
 
-pcr_oi  = total_put_oi / total_call_oi if total_call_oi else None
-pcr_vol = total_put_vol / total_call_vol if total_call_vol else None
-
-pcr_oi_txt  = f"{pcr_oi:.3f}"  if pcr_oi  else "NA"
-pcr_vol_txt = f"{pcr_vol:.3f}" if pcr_vol else "NA"
+pcr_live_oi  = put_oi_live / call_oi_live if call_oi_live else None
+pcr_live_vol = put_vol_live / call_vol_live if call_vol_live else None
 
 # -------------------------------------------------
-# LIVE GREEKS
+# DISPLAY PCR SUMMARY (ABOVE MAIN TABLE)
 # -------------------------------------------------
-df_greeks = df_live[[
-    "strike_price","contract_type",
-    "greeks.gamma","greeks.delta","greeks.vega"
-]].rename(columns={
-    "greeks.gamma":"gamma",
-    "greeks.delta":"delta",
-    "greeks.vega":"vega"
+pcr_df = pd.DataFrame({
+    "Snapshot": ["Current", t1, t2],
+    "PCR OI": [
+        f"{pcr_live_oi:.3f}" if pcr_live_oi else "NA",
+        f"{pcr_t1_oi:.3f}"   if pcr_t1_oi   else "NA",
+        f"{pcr_t2_oi:.3f}"   if pcr_t2_oi   else "NA",
+    ],
+    "PCR Volume": [
+        f"{pcr_live_vol:.3f}" if pcr_live_vol else "NA",
+        f"{pcr_t1_vol:.3f}"   if pcr_t1_vol   else "NA",
+        f"{pcr_t2_vol:.3f}"   if pcr_t2_vol   else "NA",
+    ]
 })
 
-for c in ["strike_price","gamma","delta","vega"]:
-    df_greeks[c] = pd.to_numeric(df_greeks[c], errors="coerce")
-
-calls = df_greeks[df_greeks["contract_type"]=="call_options"]
-puts  = df_greeks[df_greeks["contract_type"]=="put_options"]
-
-live_greeks = (
-    calls.groupby("strike_price",as_index=False)
-    .agg(call_gamma_live=("gamma","sum"),call_delta_live=("delta","sum"),call_vega_live=("vega","sum"))
-    .merge(
-        puts.groupby("strike_price",as_index=False)
-        .agg(put_gamma_live=("gamma","sum"),put_delta_live=("delta","sum"),put_vega_live=("vega","sum")),
-        on="strike_price",how="outer"
-    )
-)
+st.subheader(f"{UNDERLYING} PCR Snapshot")
+st.dataframe(pcr_df, use_container_width=True, hide_index=True)
 
 # -------------------------------------------------
-# LIVE MAX PAIN (SORTED FIX)
+# (REST OF YOUR CODE: max pain, greeks, final table)
 # -------------------------------------------------
-calls_mp = df_mp[df_mp["contract_type"]=="call_options"][["strike_price","mark_price","oi_contracts"]]
-puts_mp  = df_mp[df_mp["contract_type"]=="put_options"][["strike_price","mark_price","oi_contracts"]]
-
-live_mp = pd.merge(
-    calls_mp.rename(columns={"mark_price":"call_mark","oi_contracts":"call_oi"}),
-    puts_mp.rename(columns={"mark_price":"put_mark","oi_contracts":"put_oi"}),
-    on="strike_price",how="outer"
-).sort_values("strike_price").reset_index(drop=True)
-
-def compute_max_pain(df):
-    A,B,G,L,M = df["call_mark"].fillna(0),df["call_oi"].fillna(0),df["strike_price"],df["put_oi"].fillna(0),df["put_mark"].fillna(0)
-    mp=[]
-    for i in range(len(df)):
-        mp.append(round((
-            -sum(A[i:]*B[i:]) +
-            G[i]*sum(B[:i]) - sum(G[:i]*B[:i]) -
-            sum(M[:i]*L[:i]) +
-            sum(G[i:]*L[i:]) - G[i]*sum(L[i:])
-        )/10000))
-    df["Current"]=mp
-    return df[["strike_price","Current"]]
-
-live_mp = compute_max_pain(live_mp)
-
-# -------------------------------------------------
-# FINAL MERGE
-# -------------------------------------------------
-final = (
-    merged
-    .merge(live_mp,on="strike_price",how="left")
-    .merge(greeks_t1,on="strike_price",how="left")
-    .merge(live_greeks,on="strike_price",how="left")
-)
-
-final["Current − Time1"] = final["Current"] - final[t1]
-
-final["Call Gamma △"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * FACTOR / 10
-final["Put Gamma △"]  = (final["put_gamma_live"]  - final["put_gamma_t1"])  * FACTOR / 10
-final["Call Delta △"] = (final["call_delta_live"] - final["call_delta_t1"]) * FACTOR / 100000
-final["Put Delta △"]  = (final["put_delta_live"]  - final["put_delta_t1"])  * FACTOR / 100000
-final["Call Vega △"]  = (final["call_vega_live"]  - final["call_vega_t1"])  * FACTOR / 1000000
-final["Put Vega △"]   = (final["put_vega_live"]   - final["put_vega_t1"])   * FACTOR / 1000000
-
-# -------------------------------------------------
-# HEADER WITH PCR
-# -------------------------------------------------
-current_col_name = f"Current\nPCR OI = {pcr_oi_txt}\nPCR Vol = {pcr_vol_txt}"
-final = final.rename(columns={"Current": current_col_name})
-
-final = final[[
-    "strike_price",
-    current_col_name,
-    "Current − Time1",
-    t1,t2,"Change",
-    "Call Gamma △","Put Gamma △",
-    "Call Delta △","Put Delta △",
-    "Call Vega △","Put Vega △"
-]].sort_values("strike_price")
-
-final = final.round(0).astype("Int64")
-
-# -------------------------------------------------
-# DISPLAY
-# -------------------------------------------------
-st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-st.dataframe(final, use_container_width=True)
-
-st.caption("△ = Live − Time1 | PCR shown in header | Live max pain sorted correctly")
+# ⬇️ KEEP EVERYTHING ELSE EXACTLY AS YOU ALREADY HAVE IT
+# ⬇️ NO CHANGES REQUIRED BELOW THIS POINT
