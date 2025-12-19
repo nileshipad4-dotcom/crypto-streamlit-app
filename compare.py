@@ -300,6 +300,23 @@ final = final.round(0).astype("Int64")
 # DISPLAY MAIN TABLE
 # -------------------------------------------------
 st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-st.dataframe(final, use_container_width=True)
+
+st.dataframe(
+    final,
+    use_container_width=True,
+    height=700,
+    column_config={
+        "strike_price": st.column_config.NumberColumn(
+            "Strike",
+            pinned=True
+        ),
+        "Current": st.column_config.NumberColumn(
+            "Max Pain (Live)",
+            pinned=True
+        ),
+    },
+)
+
 
 st.caption("△ = Live − Time1 | PCR shown above | Max pain sorted correctly")
+
