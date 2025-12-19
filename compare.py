@@ -26,10 +26,10 @@ EXPIRY = "20-12-2025"
 UNDERLYING = st.sidebar.selectbox("Underlying", ["BTC", "ETH"])
 CSV_PATH = f"data/{UNDERLYING}.csv"
 
-# ✅ CORRECT CSV COLUMN INDICES
+# ✅ CSV COLUMN INDICES (FROM collector.py)
 STRIKE_COL_IDX     = 6
-VALUE_COL_IDX      = 19
 TIMESTAMP_COL_IDX  = 14
+VALUE_COL_IDX      = 19   # max_pain
 CALL_GAMMA_COL_IDX = 3
 PUT_GAMMA_COL_IDX  = 7
 
@@ -84,7 +84,7 @@ if t1 == t2:
     st.stop()
 
 # -------------------------------------------------
-# VALUE COMPARISON (MAX PAIN)
+# HISTORICAL MAX PAIN COMPARISON
 # -------------------------------------------------
 df_t1 = (
     df[df["timestamp"] == t1]
@@ -116,7 +116,7 @@ gamma_t1 = (
 )
 
 # -------------------------------------------------
-# FETCH LIVE OPTION CHAIN (GAMMA)
+# FETCH LIVE OPTION CHAIN
 # -------------------------------------------------
 @st.cache_data(ttl=30)
 def fetch_live_chain():
@@ -130,42 +130,85 @@ def fetch_live_chain():
         requests.get(url, timeout=20).json()["result"]
     )
 
-df_live = fetch_live_chain()[[
-    "strike_price",
-    "contract_type",
-    "greeks.gamma"
+df_live = fetch_live_chain()
+
+# -------------------------------------------------
+# LIVE GAMMA
+# -------------------------------------------------
+df_gamma = df_live[[
+    "strike_price", "contract_type", "greeks.gamma"
 ]].rename(columns={"greeks.gamma": "gamma"})
 
-df_live["strike_price"] = pd.to_numeric(df_live["strike_price"], errors="coerce")
-df_live["gamma"] = pd.to_numeric(df_live["gamma"], errors="coerce")
+df_gamma["strike_price"] = pd.to_numeric(df_gamma["strike_price"], errors="coerce")
+df_gamma["gamma"] = pd.to_numeric(df_gamma["gamma"], errors="coerce")
 
-calls = (
-    df_live[df_live["contract_type"] == "call_options"]
+calls_gamma = (
+    df_gamma[df_gamma["contract_type"] == "call_options"]
     .groupby("strike_price", as_index=False)["gamma"]
     .sum()
     .rename(columns={"gamma": "call_gamma_live"})
 )
 
-puts = (
-    df_live[df_live["contract_type"] == "put_options"]
+puts_gamma = (
+    df_gamma[df_gamma["contract_type"] == "put_options"]
     .groupby("strike_price", as_index=False)["gamma"]
     .sum()
     .rename(columns={"gamma": "put_gamma_live"})
 )
 
-live_gamma = pd.merge(calls, puts, on="strike_price", how="outer")
+live_gamma = pd.merge(calls_gamma, puts_gamma, on="strike_price", how="outer")
+
+# -------------------------------------------------
+# LIVE MAX PAIN
+# -------------------------------------------------
+df_mp = df_live[[
+    "strike_price", "contract_type", "mark_price", "oi_contracts"
+]]
+
+for c in ["strike_price", "mark_price", "oi_contracts"]:
+    df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
+
+calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
+puts_mp  = df_mp[df_mp["contract_type"] == "put_options"]
+
+live_mp_raw = pd.merge(
+    calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+    puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+    on="strike_price",
+    how="outer"
+)
+
+def compute_max_pain(df):
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].fillna(0).values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
+    for i in range(len(df)):
+        Q = -sum(A[i:] * B[i:])
+        R = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        S = -sum(M[:i] * L[:i])
+        T = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        mp.append(round((Q + R + S + T) / 10000))
+
+    df["Current"] = mp
+    return df[["strike_price", "Current"]]
+
+live_mp = compute_max_pain(live_mp_raw)
 
 # -------------------------------------------------
 # FINAL MERGE
 # -------------------------------------------------
 final = (
     merged
+    .merge(live_mp, on="strike_price", how="left")
     .merge(gamma_t1, on="strike_price", how="left")
     .merge(live_gamma, on="strike_price", how="left")
 )
 
 final["Current − Time1"] = final["Current"] - final[t1]
-
 final["Call Γ Δ"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * GAMMA_FACTOR
 final["Put Γ Δ"]  = (final["put_gamma_live"]  - final["put_gamma_t1"])  * GAMMA_FACTOR
 
@@ -180,8 +223,8 @@ final = final[[
     "Change"
 ]].sort_values("strike_price")
 
-for col in final.columns:
-    final[col] = final[col].round(0).astype("Int64")
+for c in final.columns:
+    final[c] = final[c].round(0).astype("Int64")
 
 # -------------------------------------------------
 # ATM RANGE
