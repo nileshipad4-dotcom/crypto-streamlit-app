@@ -77,7 +77,7 @@ df = pd.DataFrame({
     "put_gamma":    pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
     "put_delta":    pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
     "put_vega":     pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
-    "timestamp":    df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+    "timestamp":    df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
 }).dropna(subset=["strike_price", "timestamp"])
 
 # -------------------------------------------------
@@ -116,8 +116,9 @@ greeks_t1 = (
 )
 
 # -------------------------------------------------
-# FETCH LIVE OPTION CHAIN (NO CACHE)
+# FETCH LIVE OPTION CHAIN
 # -------------------------------------------------
+@st.cache_data(ttl=30)
 def fetch_live_chain():
     url = (
         f"{API_BASE}"
@@ -132,8 +133,14 @@ df_live = fetch_live_chain()
 # -------------------------------------------------
 # LIVE GREEKS
 # -------------------------------------------------
-df_g = df_live[["strike_price","contract_type","greeks.gamma","greeks.delta","greeks.vega"]]
-df_g.columns = ["strike_price","contract_type","gamma","delta","vega"]
+df_g = df_live[[
+    "strike_price","contract_type",
+    "greeks.gamma","greeks.delta","greeks.vega"
+]].rename(columns={
+    "greeks.gamma":"gamma",
+    "greeks.delta":"delta",
+    "greeks.vega":"vega"
+})
 
 for c in ["strike_price","gamma","delta","vega"]:
     df_g[c] = pd.to_numeric(df_g[c], errors="coerce")
@@ -156,10 +163,11 @@ live_greeks = (
 )
 
 # -------------------------------------------------
-# LIVE MAX PAIN
+# LIVE MAX PAIN (CRITICAL FIX APPLIED)
 # -------------------------------------------------
-df_mp = df_live[["strike_price","contract_type","mark_price","oi_contracts"]]
-for c in df_mp.columns:
+df_mp = df_live[["strike_price","contract_type","mark_price","oi_contracts"]].copy()
+
+for c in ["strike_price","mark_price","oi_contracts"]:
     df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
 
 calls_mp = df_mp[df_mp["contract_type"]=="call_options"]
@@ -168,25 +176,26 @@ puts_mp  = df_mp[df_mp["contract_type"]=="put_options"]
 live_mp = pd.merge(
     calls_mp.rename(columns={"mark_price":"call_mark","oi_contracts":"call_oi"}),
     puts_mp.rename(columns={"mark_price":"put_mark","oi_contracts":"put_oi"}),
-    on="strike_price", how="outer"
-).sort_values("strike_price")
+    on="strike_price",
+    how="outer"
+).sort_values("strike_price").reset_index(drop=True)
 
 def compute_max_pain(df):
-    A,B,G,L,M = (
-        df["call_mark"].fillna(0).values,
-        df["call_oi"].fillna(0).values,
-        df["strike_price"].values,
-        df["put_oi"].fillna(0).values,
-        df["put_mark"].fillna(0).values
-    )
-    mp=[]
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
     for i in range(len(df)):
         mp.append(round((
             -sum(A[i:]*B[i:]) +
             G[i]*sum(B[:i]) - sum(G[:i]*B[:i]) -
             sum(M[:i]*L[:i]) +
             sum(G[i:]*L[i:]) - G[i]*sum(L[i:])
-        )/10000))
+        ) / 10000))
+
     df["Current"] = mp
     return df[["strike_price","Current"]]
 
@@ -248,4 +257,4 @@ st.dataframe(
     },
 )
 
-st.caption("MP = Max Pain | △ = Delta | Greeks restored")
+st.caption("MP = Max Pain | △ = Delta | All values live and stable")
