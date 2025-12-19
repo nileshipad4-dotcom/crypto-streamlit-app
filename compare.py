@@ -271,22 +271,35 @@ final = final[[
 # -------------------------------------------------
 # ATM HIGHLIGHT LOGIC
 # -------------------------------------------------
-mp_cur = f"MP ({now_ts})"
-
-atm_low = atm_high = None
-if price:
-    strikes = final["strike_price"].astype(float).tolist()
-    below = [s for s in strikes if s <= price]
-    above = [s for s in strikes if s >= price]
-    if below:
-        atm_low = max(below)
-    if above:
-        atm_high = min(above)
+mp_t1 = f"MP ({t1})"
+mp_t2 = f"MP ({t2})"
 
 def highlight_atm(row):
+    styles = [""] * len(row)
+
+    # force numeric (Styler safety)
+    mp_cur_val = pd.to_numeric(row[mp_cur], errors="coerce")
+    mp_t1_val  = pd.to_numeric(row[mp_t1], errors="coerce")
+    mp_t2_val  = pd.to_numeric(row[mp_t2], errors="coerce")
+    dmp1_val   = pd.to_numeric(row["△ MP 1"], errors="coerce")
+
+    # ---- PRIORITY 1: MP < 0 at all 3 ----
+    if (
+        pd.notna(mp_cur_val) and pd.notna(mp_t1_val) and pd.notna(mp_t2_val)
+        and mp_cur_val < 0 and mp_t1_val < 0 and mp_t2_val < 0
+    ):
+        return ["background-color: #ffd6d6"] * len(row)
+
+    # ---- PRIORITY 2: Δ MP 1 < 0 ----
+    if pd.notna(dmp1_val) and dmp1_val < 0:
+        return ["background-color: #ffe0b3"] * len(row)
+
+    # ---- PRIORITY 3: ATM BAND ----
     if row["strike_price"] in (atm_low, atm_high):
-        return ["background-color: #000435"] * len(row)
-    return [""] * len(row)
+        return ["background-color: #000435; color: white"] * len(row)
+
+    return styles
+
 
 # -------------------------------------------------
 # DISPLAY
