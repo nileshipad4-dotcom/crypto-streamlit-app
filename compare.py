@@ -320,6 +320,10 @@ st.dataframe(
             "Max Pain (Live)",
             pinned=True
         ),
+        t1: st.column_config.NumberColumn(
+            f"Max Pain {t1}",
+            pinned=True
+        ),
         "Current − Time1": st.column_config.NumberColumn(
             "Δ Max Pain",
             pinned=True
@@ -328,7 +332,9 @@ st.dataframe(
 )
 
 
+
 st.caption("△ = Live − Time1 | PCR shown above | Max pain sorted correctly")
+
 
 
 
