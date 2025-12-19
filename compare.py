@@ -14,7 +14,7 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # -------------------------------------------------
 try:
     from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=30 * 1000, key="refresh")
+    st_autorefresh(interval=60 * 1000, key="refresh")
 except ImportError:
     pass
 
@@ -308,6 +308,7 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
 
