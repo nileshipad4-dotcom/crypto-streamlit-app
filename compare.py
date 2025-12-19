@@ -288,11 +288,17 @@ final["Call Vega △"]  = (final["call_vega_live"]  - final["call_vega_t1"])  * 
 final["Put Vega △"]   = (final["put_vega_live"]   - final["put_vega_t1"])   * FACTOR / 1000000
 
 final = final[[
-    "strike_price","Current","Current − Time1",t1,t2,"Change",
+    "strike_price",
+    "Current",
+    t1,
+    "Current − Time1",
+    t2,
+    "Change",
     "Call Gamma △","Put Gamma △",
     "Call Delta △","Put Delta △",
     "Call Vega △","Put Vega △"
 ]].sort_values("strike_price")
+
 
 final = final.round(0).astype("Int64")
 
@@ -319,4 +325,5 @@ st.dataframe(
 
 
 st.caption("△ = Live − Time1 | PCR shown above | Max pain sorted correctly")
+
 
