@@ -8,7 +8,7 @@ import os
 # -------------------
 # CONFIG
 # -------------------
-EXPIRIES = ["21-12-2025"]
+EXPIRIES = ["26-12-2025"]
 UNDERLYINGS = ["BTC", "ETH"]
 REFRESH_SECONDS = 60
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
@@ -188,5 +188,6 @@ if download_raw:
     )
 
 st.caption("Live data auto-exported every refresh • Delta Exchange")
+
 
 
