@@ -8,9 +8,9 @@ import os
 # -------------------
 # CONFIG
 # -------------------
-EXPIRIES = ["20-12-2025"]
+EXPIRIES = ["21-12-2025"]
 UNDERLYINGS = ["BTC", "ETH"]
-REFRESH_SECONDS = 30
+REFRESH_SECONDS = 60
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 HEADERS = {"Accept": "application/json"}
 
