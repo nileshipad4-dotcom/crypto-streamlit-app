@@ -284,7 +284,8 @@ final = (
 )
 
 final["Current − Time1"] = final["Current"] - final[t1]
-final["ΔΔ MP 1"] = final["Current − Time1"].shift(-1) - final["Current − Time1"]
+final["ΔΔ MP 1"] = -1 * ( final["Current − Time1"].shift(-1) - final["Current − Time1"])
+
 final["Call Gamma △"] = (final["call_gamma_live"] - final["call_gamma_t1"]) * FACTOR / 10
 final["Put Gamma △"] = (final["put_gamma_live"] - final["put_gamma_t1"]) * FACTOR / 10
 final["Call Delta △"] = (final["call_delta_live"] - final["call_delta_t1"]) * FACTOR / 100000
@@ -363,6 +364,7 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
 
