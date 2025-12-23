@@ -28,7 +28,7 @@ def get_ist_time():
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "23-12-2025"
+EXPIRY = "24-12-2025"
 
 UNDERLYING = st.sidebar.selectbox("Underlying", ["BTC", "ETH"])
 CSV_PATH = f"data/{UNDERLYING}.csv"
@@ -410,3 +410,4 @@ st.dataframe(
 st.caption(
     "🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above"
 )
+
