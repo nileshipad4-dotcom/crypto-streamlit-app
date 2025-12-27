@@ -42,12 +42,6 @@ PUT_OI_COL_IDX = 11
 CALL_VOL_COL_IDX = 2
 PUT_VOL_COL_IDX = 10
 
-CALL_GAMMA_COL_IDX = 3
-CALL_DELTA_COL_IDX = 4
-CALL_VEGA_COL_IDX = 5
-PUT_GAMMA_COL_IDX = 7
-PUT_DELTA_COL_IDX = 8
-PUT_VEGA_COL_IDX = 9
 
 FACTOR = 100_000_000
 
@@ -81,12 +75,7 @@ df = pd.DataFrame({
     "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
     "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
     "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-    "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
-    "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
-    "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
-    "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
-    "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
-    "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
+
     "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
 }).dropna(subset=["strike_price", "timestamp"])
 
@@ -249,53 +238,21 @@ live_mp = compute_max_pain(live_mp)
 # -------------------------------------------------
 # GREEKS (TIME-1 vs LIVE)
 # -------------------------------------------------
-greeks_t1 = (
-    df[df["timestamp"] == t1]
-    .groupby("strike_price", as_index=False)
-    .agg(
-        call_gamma_t1=("call_gamma", "sum"),
-        call_delta_t1=("call_delta", "sum"),
-        call_vega_t1=("call_vega", "sum"),
-        put_gamma_t1=("put_gamma", "sum"),
-        put_delta_t1=("put_delta", "sum"),
-        put_vega_t1=("put_vega", "sum"),
-    )
-)
+
 
 df_g = df_live[[
     "strike_price",
-    "contract_type",
-    "greeks.gamma",
-    "greeks.delta",
-    "greeks.vega"
+    "contract_type"
 ]].copy()
 
-df_g.columns = ["strike_price", "contract_type", "gamma", "delta", "vega"]
+df_g.columns = ["strike_price", "contract_type"]
 
-for c in ["strike_price", "gamma", "delta", "vega"]:
+for c in ["strike_price"]:
     df_g[c] = pd.to_numeric(df_g[c], errors="coerce")
 
 calls = df_g[df_g["contract_type"] == "call_options"]
 puts = df_g[df_g["contract_type"] == "put_options"]
 
-live_greeks = (
-    calls.groupby("strike_price", as_index=False)
-    .agg(
-        call_gamma_live=("gamma", "sum"),
-        call_delta_live=("delta", "sum"),
-        call_vega_live=("vega", "sum"),
-    )
-    .merge(
-        puts.groupby("strike_price", as_index=False)
-        .agg(
-            put_gamma_live=("gamma", "sum"),
-            put_delta_live=("delta", "sum"),
-            put_vega_live=("vega", "sum"),
-        ),
-        on="strike_price",
-        how="outer",
-    )
-)
 
 # -------------------------------------------------
 # FINAL MERGE
@@ -303,8 +260,6 @@ live_greeks = (
 final = (
     merged
     .merge(live_mp, on="strike_price", how="left")
-    .merge(greeks_t1, on="strike_price", how="left")
-    .merge(live_greeks, on="strike_price", how="left")
 )
 
 final["Current − Time1"] = final["Current"] - final[t1]
@@ -312,29 +267,6 @@ final["ΔΔ MP 1"] = -1 * (
     final["Current − Time1"].shift(-1) - final["Current − Time1"]
 )
 
-final["Call Gamma △"] = (
-    final["call_gamma_live"] - final["call_gamma_t1"]
-) * FACTOR / 100
-
-final["Put Gamma △"] = (
-    final["put_gamma_live"] - final["put_gamma_t1"]
-) * FACTOR / 100
-
-final["Call Delta △"] = (
-    final["call_delta_live"] - final["call_delta_t1"]
-) * FACTOR / 100000
-
-final["Put Delta △"] = (
-    final["put_delta_live"] - final["put_delta_t1"]
-) * FACTOR / -100000
-
-final["Call Vega △"] = (
-    final["call_vega_live"] - final["call_vega_t1"]
-) * FACTOR / 1000000
-
-final["Put Vega △"] = (
-    final["put_vega_live"] - final["put_vega_t1"]
-) * FACTOR / 1000000
 
 # -------------------------------------------------
 # RENAME + ORDER
@@ -358,12 +290,7 @@ final = final[
         "ΔΔ MP 1",
         f"MP ({t2})",
         "△ MP 2",
-        "Call Gamma △",
-        "Put Gamma △",
-        "Call Delta △",
-        "Put Delta △",
-        "Call Vega △",
-        "Put Vega △",
+      
     ]
 ].round(0).astype("Int64")
 
@@ -410,5 +337,6 @@ st.dataframe(
 st.caption(
     "🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above"
 )
+
 
 
