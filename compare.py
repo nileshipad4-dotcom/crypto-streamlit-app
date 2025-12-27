@@ -1,3 +1,5 @@
+# crypto compare
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -42,7 +44,6 @@ PUT_OI_COL_IDX = 11
 CALL_VOL_COL_IDX = 2
 PUT_VOL_COL_IDX = 10
 
-
 FACTOR = 100_000_000
 
 # -------------------------------------------------
@@ -75,7 +76,6 @@ df = pd.DataFrame({
     "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
     "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
     "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-
     "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
 }).dropna(subset=["strike_price", "timestamp"])
 
@@ -236,25 +236,6 @@ def compute_max_pain(df):
 live_mp = compute_max_pain(live_mp)
 
 # -------------------------------------------------
-# GREEKS (TIME-1 vs LIVE)
-# -------------------------------------------------
-
-
-df_g = df_live[[
-    "strike_price",
-    "contract_type"
-]].copy()
-
-df_g.columns = ["strike_price", "contract_type"]
-
-for c in ["strike_price"]:
-    df_g[c] = pd.to_numeric(df_g[c], errors="coerce")
-
-calls = df_g[df_g["contract_type"] == "call_options"]
-puts = df_g[df_g["contract_type"] == "put_options"]
-
-
-# -------------------------------------------------
 # FINAL MERGE
 # -------------------------------------------------
 final = (
@@ -263,10 +244,6 @@ final = (
 )
 
 final["Current − Time1"] = final["Current"] - final[t1]
-final["ΔΔ MP 1"] = -1 * (
-    final["Current − Time1"].shift(-1) - final["Current − Time1"]
-)
-
 
 # -------------------------------------------------
 # RENAME + ORDER
@@ -287,10 +264,8 @@ final = final[
         f"MP ({now_ts})",
         f"MP ({t1})",
         "△ MP 1",
-        "ΔΔ MP 1",
         f"MP ({t2})",
         "△ MP 2",
-      
     ]
 ].round(0).astype("Int64")
 
@@ -337,6 +312,3 @@ st.dataframe(
 st.caption(
     "🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above"
 )
-
-
-
