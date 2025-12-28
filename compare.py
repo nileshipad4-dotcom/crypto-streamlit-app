@@ -26,12 +26,18 @@ except ImportError:
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
+def rotated_time_sort(times, pivot="17:30"):
+    pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
+    def key(t):
+        h, m = map(int, t.split(":"))
+        return ((h * 60 + m) - pivot_minutes) % (24 * 60)
+    return sorted(times, key=key, reverse=True)
+
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "28-12-2025"
-
 ASSETS = ["BTC", "ETH"]
 
 STRIKE_COL_IDX = 6
@@ -57,38 +63,22 @@ FACTOR = 100_000_000
 # -------------------------------------------------
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
-    try:
-        r = requests.get(API_BASE, timeout=10).json()["result"]
-        sym = f"{symbol}USD"
-        return float(next(x for x in r if x["symbol"] == sym)["mark_price"])
-    except Exception:
-        return None
+    r = requests.get(API_BASE, timeout=10).json()["result"]
+    return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
 
 prices = {a: get_delta_price(a) for a in ASSETS}
 
 c1, c2 = st.columns(2)
-c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
-c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
+c1.metric("BTC Price", f"{int(prices['BTC']):,}")
+c2.metric("ETH Price", f"{int(prices['ETH']):,}")
 
 # -------------------------------------------------
-# TIME SORT
-# -------------------------------------------------
-def rotated_time_sort(times, pivot="17:30"):
-    pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
-
-    def key(t):
-        h, m = map(int, t.split(":"))
-        return ((h * 60 + m) - pivot_minutes) % (24 * 60)
-
-    return sorted(times, key=key, reverse=True)
-
-# -------------------------------------------------
-# PCR COLLECTOR
+# PCR COLLECTION
 # -------------------------------------------------
 pcr_rows = []
 
 # -------------------------------------------------
-# LOOP OVER ASSETS
+# MAIN LOOP (BTC + ETH)
 # -------------------------------------------------
 for UNDERLYING in ASSETS:
 
@@ -114,6 +104,7 @@ for UNDERLYING in ASSETS:
     timestamps = rotated_time_sort(df["timestamp"].unique())
     t1, t2 = timestamps[0], timestamps[1]
 
+    # ---------------- PCR ----------------
     def compute_pcr(d):
         return (
             d["put_oi"].sum() / d["call_oi"].sum(),
@@ -123,15 +114,14 @@ for UNDERLYING in ASSETS:
     pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
     pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
 
-    # LIVE PCR
-    url = (
-        f"https://api.india.delta.exchange/v2/tickers"
-        f"?contract_types=call_options,put_options"
-        f"&underlying_asset_symbols={UNDERLYING}"
-        f"&expiry_date={EXPIRY}"
+    df_live = pd.json_normalize(
+        requests.get(
+            f"{API_BASE}?contract_types=call_options,put_options"
+            f"&underlying_asset_symbols={UNDERLYING}"
+            f"&expiry_date={EXPIRY}"
+        ).json()["result"]
     )
 
-    df_live = pd.json_normalize(requests.get(url).json()["result"])
     df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
 
@@ -145,25 +135,64 @@ for UNDERLYING in ASSETS:
         / df_live[df_live["contract_type"] == "call_options"]["volume"].sum()
     )
 
-    pcr_rows.append([
-        UNDERLYING,
-        pcr_live_oi,
-        pcr_t1_oi,
-        pcr_t2_oi,
-        pcr_live_vol,
-        pcr_t1_vol,
-        pcr_t2_vol,
-    ])
+    pcr_rows.append([UNDERLYING, pcr_live_oi, pcr_t1_oi, pcr_t2_oi, pcr_live_vol, pcr_t1_vol, pcr_t2_vol])
 
     # -------------------------------------------------
-    # (UNCHANGED) MAX PAIN & GREEKS LOGIC
+    # 🔴 MAX PAIN + GREEKS (UNCHANGED LOGIC)
     # -------------------------------------------------
-    # 🔴 FULL LOGIC OMITTED FOR BREVITY
-    # 🔴 YOUR ORIGINAL MAX PAIN SECTION REMAINS IDENTICAL
-    # 🔴 DISPLAY TABLE PER ASSET AS BEFORE
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
 
-    st.subheader(f"{UNDERLYING} Max Pain Comparison")
-    st.caption("Max Pain table logic unchanged")
+    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
+    merged["Change"] = merged[t1] - merged[t2]
+
+    df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
+    for c in ["strike_price", "mark_price", "oi_contracts"]:
+        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
+
+    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
+    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
+
+    live_mp = pd.merge(
+        calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+        puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+        on="strike_price",
+        how="outer",
+    ).sort_values("strike_price")
+
+    def compute_max_pain(df):
+        A = df["call_mark"].fillna(0).values
+        B = df["call_oi"].fillna(0).values
+        G = df["strike_price"].values
+        L = df["put_oi"].fillna(0).values
+        M = df["put_mark"].fillna(0).values
+
+        df["Current"] = [
+            round(
+                (-sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+                 - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])) / 10000
+            )
+            for i in range(len(df))
+        ]
+        return df[["strike_price", "Current"]]
+
+    live_mp = compute_max_pain(live_mp)
+
+    final = merged.merge(live_mp, on="strike_price", how="left")
+
+    now_ts = get_ist_time()
+    final = final.rename(columns={
+        "Current": f"MP ({now_ts})",
+        t1: f"MP ({t1})",
+        t2: f"MP ({t2})",
+        "Change": "△ MP 2",
+    })
+
+    final = final.round(0).astype("Int64")
+
+    # ---------------- DISPLAY ----------------
+    st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
+    st.dataframe(final, use_container_width=True, height=650)
 
 # -------------------------------------------------
 # PCR TABLE (COMBINED)
