@@ -76,7 +76,7 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# COMMON TIMESTAMP SELECTION (USED BY BOTH)
+# COMMON TIMESTAMP SELECTION
 # -------------------------------------------------
 df_ts = pd.read_csv("data/BTC.csv")
 df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
@@ -99,9 +99,6 @@ pcr_rows = []
 # =================================================
 for UNDERLYING in ASSETS:
 
-    st.divider()
-    st.subheader(f"{UNDERLYING} Analysis")
-
     CSV_PATH = f"data/{UNDERLYING}.csv"
     df_raw = pd.read_csv(CSV_PATH)
 
@@ -121,9 +118,7 @@ for UNDERLYING in ASSETS:
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    # -------------------------------------------------
-    # PCR FROM CSV SNAPSHOTS
-    # -------------------------------------------------
+    # ---------------- PCR (CSV SNAPSHOT) ----------------
     def compute_pcr(d):
         return (
             d["put_oi"].sum() / d["call_oi"].sum() if d["call_oi"].sum() else None,
@@ -133,9 +128,7 @@ for UNDERLYING in ASSETS:
     pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
     pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
 
-    # -------------------------------------------------
-    # FETCH LIVE OPTION CHAIN
-    # -------------------------------------------------
+    # ---------------- LIVE CHAIN ----------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -403,7 +396,7 @@ for UNDERLYING in ASSETS:
     )
 
 # -------------------------------------------------
-# PCR TABLE (COMBINED)
+# PCR TABLES (TOP, SPLIT)
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
@@ -418,7 +411,16 @@ pcr_df = pd.DataFrame(
     ],
 ).set_index("Asset")
 
-st.subheader("📊 PCR Snapshot (BTC & ETH)")
-st.dataframe(pcr_df.round(3), use_container_width=True)
+st.subheader("📊 PCR Snapshot — OI")
+st.dataframe(
+    pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3),
+    use_container_width=True,
+)
+
+st.subheader("📊 PCR Snapshot — Volume")
+st.dataframe(
+    pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3),
+    use_container_width=True,
+)
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
