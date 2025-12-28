@@ -63,14 +63,31 @@ FACTOR = 100_000_000
 # -------------------------------------------------
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
-    r = requests.get(API_BASE, timeout=10).json()["result"]
-    return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
+    try:
+        r = requests.get(API_BASE, timeout=10).json()["result"]
+        return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
+    except Exception:
+        return None
 
 prices = {a: get_delta_price(a) for a in ASSETS}
 
 c1, c2 = st.columns(2)
-c1.metric("BTC Price", f"{int(prices['BTC']):,}")
-c2.metric("ETH Price", f"{int(prices['ETH']):,}")
+c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
+c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
+
+# -------------------------------------------------
+# COMMON TIMESTAMP SELECTION (USED BY BOTH)
+# -------------------------------------------------
+df_ts = pd.read_csv("data/BTC.csv")
+df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+
+timestamps = rotated_time_sort(df_ts["timestamp"].unique())
+
+col1, col2 = st.columns(2)
+with col1:
+    t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
+with col2:
+    t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -104,30 +121,27 @@ for UNDERLYING in ASSETS:
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    # ---------------- TIME SELECTORS ----------------
-    timestamps = rotated_time_sort(df["timestamp"].unique())
-    col1, col2 = st.columns(2)
-    with col1:
-        t1 = st.selectbox(f"{UNDERLYING} Time 1 (Latest)", timestamps, index=0, key=f"{UNDERLYING}_t1")
-    with col2:
-        t2 = st.selectbox(f"{UNDERLYING} Time 2 (Previous)", timestamps, index=1, key=f"{UNDERLYING}_t2")
-
-    # ---------------- PCR (CSV SNAPSHOT) ----------------
+    # -------------------------------------------------
+    # PCR FROM CSV SNAPSHOTS
+    # -------------------------------------------------
     def compute_pcr(d):
         return (
-            d["put_oi"].sum() / d["call_oi"].sum(),
-            d["put_vol"].sum() / d["call_vol"].sum(),
+            d["put_oi"].sum() / d["call_oi"].sum() if d["call_oi"].sum() else None,
+            d["put_vol"].sum() / d["call_vol"].sum() if d["call_vol"].sum() else None,
         )
 
     pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
     pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
 
-    # ---------------- LIVE CHAIN ----------------
+    # -------------------------------------------------
+    # FETCH LIVE OPTION CHAIN
+    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
             f"&underlying_asset_symbols={UNDERLYING}"
-            f"&expiry_date={EXPIRY}"
+            f"&expiry_date={EXPIRY}",
+            timeout=20
         ).json()["result"]
     )
 
@@ -155,18 +169,256 @@ for UNDERLYING in ASSETS:
     ])
 
     # -------------------------------------------------
-    # 🔴 YOUR ORIGINAL MAX PAIN + GREEKS LOGIC CONTINUES
-    # -------------------------------------------------
-    # ⬇️ EVERYTHING FROM:
     # HISTORICAL MAX PAIN
+    # -------------------------------------------------
+    df_t1 = (
+        df[df["timestamp"] == t1]
+        .groupby("strike_price", as_index=False)["value"]
+        .sum()
+        .rename(columns={"value": t1})
+    )
+
+    df_t2 = (
+        df[df["timestamp"] == t2]
+        .groupby("strike_price", as_index=False)["value"]
+        .sum()
+        .rename(columns={"value": t2})
+    )
+
+    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
+    merged["Change"] = merged[t1] - merged[t2]
+
+    # -------------------------------------------------
     # LIVE MAX PAIN
+    # -------------------------------------------------
+    df_mp = df_live[[
+        "strike_price",
+        "contract_type",
+        "mark_price",
+        "oi_contracts"
+    ]].copy()
+
+    for c in ["strike_price", "mark_price", "oi_contracts"]:
+        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
+
+    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
+    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
+
+    live_mp = (
+        pd.merge(
+            calls_mp.rename(columns={
+                "mark_price": "call_mark",
+                "oi_contracts": "call_oi"
+            }),
+            puts_mp.rename(columns={
+                "mark_price": "put_mark",
+                "oi_contracts": "put_oi"
+            }),
+            on="strike_price",
+            how="outer",
+        )
+        .sort_values("strike_price")
+    )
+
+    def compute_max_pain(df):
+        A = df["call_mark"].fillna(0).values
+        B = df["call_oi"].fillna(0).values
+        G = df["strike_price"].values
+        L = df["put_oi"].fillna(0).values
+        M = df["put_mark"].fillna(0).values
+
+        df["Current"] = [
+            round(
+                (
+                    -sum(A[i:] * B[i:])
+                    + G[i] * sum(B[:i])
+                    - sum(G[:i] * B[:i])
+                    - sum(M[:i] * L[:i])
+                    + sum(G[i:] * L[i:])
+                    - G[i] * sum(L[i:])
+                ) / 10000
+            )
+            for i in range(len(df))
+        ]
+        return df[["strike_price", "Current"]]
+
+    live_mp = compute_max_pain(live_mp)
+
+    # -------------------------------------------------
     # GREEKS (TIME-1 vs LIVE)
+    # -------------------------------------------------
+    greeks_t1 = (
+        df[df["timestamp"] == t1]
+        .groupby("strike_price", as_index=False)
+        .agg(
+            call_gamma_t1=("call_gamma", "sum"),
+            call_delta_t1=("call_delta", "sum"),
+            call_vega_t1=("call_vega", "sum"),
+            put_gamma_t1=("put_gamma", "sum"),
+            put_delta_t1=("put_delta", "sum"),
+            put_vega_t1=("put_vega", "sum"),
+        )
+    )
+
+    df_g = df_live[[
+        "strike_price",
+        "contract_type",
+        "greeks.gamma",
+        "greeks.delta",
+        "greeks.vega"
+    ]].copy()
+
+    df_g.columns = ["strike_price", "contract_type", "gamma", "delta", "vega"]
+
+    for c in ["strike_price", "gamma", "delta", "vega"]:
+        df_g[c] = pd.to_numeric(df_g[c], errors="coerce")
+
+    calls = df_g[df_g["contract_type"] == "call_options"]
+    puts = df_g[df_g["contract_type"] == "put_options"]
+
+    live_greeks = (
+        calls.groupby("strike_price", as_index=False)
+        .agg(
+            call_gamma_live=("gamma", "sum"),
+            call_delta_live=("delta", "sum"),
+            call_vega_live=("vega", "sum"),
+        )
+        .merge(
+            puts.groupby("strike_price", as_index=False)
+            .agg(
+                put_gamma_live=("gamma", "sum"),
+                put_delta_live=("delta", "sum"),
+                put_vega_live=("vega", "sum"),
+            ),
+            on="strike_price",
+            how="outer",
+        )
+    )
+
+    # -------------------------------------------------
     # FINAL MERGE
+    # -------------------------------------------------
+    final = (
+        merged
+        .merge(live_mp, on="strike_price", how="left")
+        .merge(greeks_t1, on="strike_price", how="left")
+        .merge(live_greeks, on="strike_price", how="left")
+    )
+
+    final["Current − Time1"] = final["Current"] - final[t1]
+    final["ΔΔ MP 1"] = -1 * (
+        final["Current − Time1"].shift(-1) - final["Current − Time1"]
+    )
+
+    final["Call Gamma △"] = (
+        final["call_gamma_live"] - final["call_gamma_t1"]
+    ) * FACTOR / 100
+
+    final["Put Gamma △"] = (
+        final["put_gamma_live"] - final["put_gamma_t1"]
+    ) * FACTOR / 100
+
+    final["Call Delta △"] = (
+        final["call_delta_live"] - final["call_delta_t1"]
+    ) * FACTOR / 100000
+
+    final["Put Delta △"] = (
+        final["put_delta_live"] - final["put_delta_t1"]
+    ) * FACTOR / -100000
+
+    final["Call Vega △"] = (
+        final["call_vega_live"] - final["call_vega_t1"]
+    ) * FACTOR / 1000000
+
+    final["Put Vega △"] = (
+        final["put_vega_live"] - final["put_vega_t1"]
+    ) * FACTOR / 1000000
+
+    # -------------------------------------------------
+    # RENAME + ORDER
+    # -------------------------------------------------
+    now_ts = get_ist_time()
+
+    final = final.rename(columns={
+        "Current": f"MP ({now_ts})",
+        t1: f"MP ({t1})",
+        t2: f"MP ({t2})",
+        "Current − Time1": "△ MP 1",
+        "Change": "△ MP 2",
+    })
+
+    final = final[
+        [
+            "strike_price",
+            f"MP ({now_ts})",
+            f"MP ({t1})",
+            "△ MP 1",
+            "ΔΔ MP 1",
+            f"MP ({t2})",
+            "△ MP 2",
+            "Call Gamma △",
+            "Put Gamma △",
+            "Call Delta △",
+            "Put Delta △",
+            "Call Vega △",
+            "Put Vega △",
+        ]
+    ].round(0).astype("Int64")
+
+    # -------------------------------------------------
     # ATM HIGHLIGHT
+    # -------------------------------------------------
+    mp_cur = f"MP ({now_ts})"
+    atm_low = atm_high = None
+
+    if prices[UNDERLYING]:
+        strikes = final["strike_price"].astype(float).tolist()
+        below = [s for s in strikes if s <= prices[UNDERLYING]]
+        above = [s for s in strikes if s >= prices[UNDERLYING]]
+        if below:
+            atm_low = max(below)
+        if above:
+            atm_high = min(above)
+
+    def highlight_atm(row):
+        if row["strike_price"] in (atm_low, atm_high):
+            return ["background-color:#000435"] * len(row)
+        return [""] * len(row)
+
+    # -------------------------------------------------
     # DISPLAY
-    # ⬇️ REMAINS **UNCHANGED**
-    #
-    # 👉 Paste that entire block here exactly as-is
-    #
-    # st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    # st.dataframe(...)
+    # -------------------------------------------------
+    st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
+
+    st.dataframe(
+        final.style.apply(highlight_atm, axis=1),
+        use_container_width=True,
+        height=700,
+        column_config={
+            "strike_price": st.column_config.NumberColumn("Strike", pinned=True),
+            mp_cur: st.column_config.NumberColumn(mp_cur, pinned=True),
+            f"MP ({t1})": st.column_config.NumberColumn(f"MP ({t1})", pinned=True),
+            "△ MP 1": st.column_config.NumberColumn("△ MP 1", pinned=True),
+        },
+    )
+
+# -------------------------------------------------
+# PCR TABLE (COMBINED)
+# -------------------------------------------------
+pcr_df = pd.DataFrame(
+    pcr_rows,
+    columns=[
+        "Asset",
+        "PCR OI (Current)",
+        "PCR OI (T1)",
+        "PCR OI (T2)",
+        "PCR Vol (Current)",
+        "PCR Vol (T1)",
+        "PCR Vol (T2)",
+    ],
+).set_index("Asset")
+
+st.subheader("📊 PCR Snapshot (BTC & ETH)")
+st.dataframe(pcr_df.round(3), use_container_width=True)
+
+st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
