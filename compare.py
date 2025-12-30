@@ -38,7 +38,7 @@ def rotated_time_sort(times, pivot="17:30"):
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "30-12-2025"
+EXPIRY = "31-12-2025"
 ASSETS = ["BTC", "ETH"]
 
 STRIKE_COL_IDX = 6
