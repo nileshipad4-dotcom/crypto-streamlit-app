@@ -14,11 +14,12 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # -------------------------------------------------
 # AUTO REFRESH (60s)
 # -------------------------------------------------
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=60 * 1000, key="refresh")
-except ImportError:
-    pass
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = datetime.utcnow()
+
+if (datetime.utcnow() - st.session_state.last_refresh).seconds >= 60:
+    st.session_state.last_refresh = datetime.utcnow()
+    st.rerun()
 
 # -------------------------------------------------
 # HELPERS
@@ -424,3 +425,4 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
