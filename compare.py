@@ -180,6 +180,11 @@ for UNDERLYING in ASSETS:
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["Change"] = merged[t1] - merged[t2]
 
+    # ✅ FIX: ΔΔ MP 2 CALCULATED HERE (CORRECT PLACE)
+    merged["ΔΔ MP 2"] = -1 * (
+        merged["Change"].shift(-1) - merged["Change"]
+    )
+
     # -------------------------------------------------
     # LIVE MAX PAIN
     # -------------------------------------------------
@@ -250,7 +255,7 @@ for UNDERLYING in ASSETS:
     )
 
     # -------------------------------------------------
-    # RENAME
+    # RENAME + ORDER
     # -------------------------------------------------
     now_ts = get_ist_time()
 
@@ -262,14 +267,6 @@ for UNDERLYING in ASSETS:
         "Change": "△ MP 2",
     })
 
-    # ✅ CORRECT PLACEMENT (FIX)
-    final["ΔΔ MP 2"] = -1 * (
-        final["△ MP 2"].shift(-1) - final["△ MP 2"]
-    )
-
-    # -------------------------------------------------
-    # ORDER
-    # -------------------------------------------------
     final = final[
         [
             "strike_price",
@@ -290,7 +287,7 @@ for UNDERLYING in ASSETS:
     st.dataframe(final, use_container_width=True)
 
 # -------------------------------------------------
-# PCR TABLES
+# PCR TABLE
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
@@ -305,8 +302,7 @@ pcr_df = pd.DataFrame(
     ],
 ).set_index("Asset")
 
-st.subheader("📊 PCR Snapshot — OI")
-st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3))
+st.subheader("📊 PCR Snapshot")
+st.dataframe(pcr_df.round(3), use_container_width=True)
 
-st.subheader("📊 PCR Snapshot — Volume")
-st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
+st.caption("🟡 MP = Max Pain | △ = Difference | ΔΔ = Strike-to-strike difference")
