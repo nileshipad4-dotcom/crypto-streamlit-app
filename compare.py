@@ -232,15 +232,16 @@ for UNDERLYING in ASSETS:
     final = final[
         [
             "strike_price",
-            f"MP ({now_ts})",
-            f"MP ({t1})",
-            "△ MP 1",
-            "ΔΔ MP 1",
-            f"MP ({t2})",
-            "△ MP 2",
-            "ΔΔ MP 2",
-        ]
+            f"MP ({now_ts})",   # mp1
+            f"MP ({t1})",       # mp2
+            f"MP ({t2})",       # mp3
+            "△ MP 1",           # delta mp1
+            "△ MP 2",           # delta mp2
+            "ΔΔ MP 1",          # delta delta mp1
+            "ΔΔ MP 2",          # delta delta mp2
+       ]
     ].round(0).astype("Int64")
+
 
     # -------------------------------------------------
     # HIGHLIGHTING
@@ -288,3 +289,4 @@ st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+
