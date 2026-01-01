@@ -237,64 +237,11 @@ for UNDERLYING in ASSETS:
     live_mp = compute_max_pain(live_mp)
 
     # -------------------------------------------------
-    # GREEKS (TIME-1 vs LIVE)
-    # -------------------------------------------------
-    greeks_t1 = (
-        df[df["timestamp"] == t1]
-        .groupby("strike_price", as_index=False)
-        .agg(
-            call_gamma_t1=("call_gamma", "sum"),
-            call_delta_t1=("call_delta", "sum"),
-            call_vega_t1=("call_vega", "sum"),
-            put_gamma_t1=("put_gamma", "sum"),
-            put_delta_t1=("put_delta", "sum"),
-            put_vega_t1=("put_vega", "sum"),
-        )
-    )
-
-    df_g = df_live[[
-        "strike_price",
-        "contract_type",
-        "greeks.gamma",
-        "greeks.delta",
-        "greeks.vega"
-    ]].copy()
-
-    df_g.columns = ["strike_price", "contract_type", "gamma", "delta", "vega"]
-
-    for c in ["strike_price", "gamma", "delta", "vega"]:
-        df_g[c] = pd.to_numeric(df_g[c], errors="coerce")
-
-    calls = df_g[df_g["contract_type"] == "call_options"]
-    puts = df_g[df_g["contract_type"] == "put_options"]
-
-    live_greeks = (
-        calls.groupby("strike_price", as_index=False)
-        .agg(
-            call_gamma_live=("gamma", "sum"),
-            call_delta_live=("delta", "sum"),
-            call_vega_live=("vega", "sum"),
-        )
-        .merge(
-            puts.groupby("strike_price", as_index=False)
-            .agg(
-                put_gamma_live=("gamma", "sum"),
-                put_delta_live=("delta", "sum"),
-                put_vega_live=("vega", "sum"),
-            ),
-            on="strike_price",
-            how="outer",
-        )
-    )
-
-    # -------------------------------------------------
     # FINAL MERGE
     # -------------------------------------------------
     final = (
         merged
         .merge(live_mp, on="strike_price", how="left")
-        .merge(greeks_t1, on="strike_price", how="left")
-        .merge(live_greeks, on="strike_price", how="left")
     )
 
     final["Current − Time1"] = final["Current"] - final[t1]
@@ -302,37 +249,8 @@ for UNDERLYING in ASSETS:
         final["Current − Time1"].shift(-1) - final["Current − Time1"]
     )
 
-    final["ΔΔ MP 2"] = -1 * (
-    final["△ MP 2"].shift(-1) - final["△ MP 2"]
-    )
-
-
-    final["Call Gamma △"] = (
-        final["call_gamma_live"] - final["call_gamma_t1"]
-    ) * FACTOR / 100
-
-    final["Put Gamma △"] = (
-        final["put_gamma_live"] - final["put_gamma_t1"]
-    ) * FACTOR / 100
-
-    final["Call Delta △"] = (
-        final["call_delta_live"] - final["call_delta_t1"]
-    ) * FACTOR / 100000
-
-    final["Put Delta △"] = (
-        final["put_delta_live"] - final["put_delta_t1"]
-    ) * FACTOR / -100000
-
-    final["Call Vega △"] = (
-        final["call_vega_live"] - final["call_vega_t1"]
-    ) * FACTOR / 1000000
-
-    final["Put Vega △"] = (
-        final["put_vega_live"] - final["put_vega_t1"]
-    ) * FACTOR / 1000000
-
     # -------------------------------------------------
-    # RENAME + ORDER
+    # RENAME
     # -------------------------------------------------
     now_ts = get_ist_time()
 
@@ -344,6 +262,14 @@ for UNDERLYING in ASSETS:
         "Change": "△ MP 2",
     })
 
+    # ✅ CORRECT PLACEMENT (FIX)
+    final["ΔΔ MP 2"] = -1 * (
+        final["△ MP 2"].shift(-1) - final["△ MP 2"]
+    )
+
+    # -------------------------------------------------
+    # ORDER
+    # -------------------------------------------------
     final = final[
         [
             "strike_price",
@@ -353,55 +279,18 @@ for UNDERLYING in ASSETS:
             "ΔΔ MP 1",
             f"MP ({t2})",
             "△ MP 2",
-             "ΔΔ MP 2",
-            "Call Gamma △",
-            "Put Gamma △",
-            "Call Delta △",
-            "Put Delta △",
-            "Call Vega △",
-            "Put Vega △",
+            "ΔΔ MP 2",
         ]
     ].round(0).astype("Int64")
-
-    # -------------------------------------------------
-    # ATM HIGHLIGHT
-    # -------------------------------------------------
-    mp_cur = f"MP ({now_ts})"
-    atm_low = atm_high = None
-
-    if prices[UNDERLYING]:
-        strikes = final["strike_price"].astype(float).tolist()
-        below = [s for s in strikes if s <= prices[UNDERLYING]]
-        above = [s for s in strikes if s >= prices[UNDERLYING]]
-        if below:
-            atm_low = max(below)
-        if above:
-            atm_high = min(above)
-
-    def highlight_atm(row):
-        if row["strike_price"] in (atm_low, atm_high):
-            return ["background-color:#000435"] * len(row)
-        return [""] * len(row)
 
     # -------------------------------------------------
     # DISPLAY
     # -------------------------------------------------
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-
-    st.dataframe(
-        final.style.apply(highlight_atm, axis=1),
-        use_container_width=True,
-        height=700,
-        column_config={
-            "strike_price": st.column_config.NumberColumn("Strike", pinned=True),
-            mp_cur: st.column_config.NumberColumn(mp_cur, pinned=True),
-            f"MP ({t1})": st.column_config.NumberColumn(f"MP ({t1})", pinned=True),
-            "△ MP 1": st.column_config.NumberColumn("△ MP 1", pinned=True),
-        },
-    )
+    st.dataframe(final, use_container_width=True)
 
 # -------------------------------------------------
-# PCR TABLES (TOP, SPLIT)
+# PCR TABLES
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
@@ -417,19 +306,7 @@ pcr_df = pd.DataFrame(
 ).set_index("Asset")
 
 st.subheader("📊 PCR Snapshot — OI")
-st.dataframe(
-    pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3),
-    use_container_width=True,
-)
+st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3))
 
 st.subheader("📊 PCR Snapshot — Volume")
-st.dataframe(
-    pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3),
-    use_container_width=True,
-)
-
-st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
-
-
-
-
+st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
