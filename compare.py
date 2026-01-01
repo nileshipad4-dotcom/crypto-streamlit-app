@@ -303,7 +303,8 @@ for UNDERLYING in ASSETS:
     # DISPLAY
     # -------------------------------------------------
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final, use_container_width=True)
+    st.dataframe(final.style.apply(highlight_atm, axis=1), use_container_width=True)
+
 
 # -------------------------------------------------
 # PCR TABLE
@@ -325,4 +326,5 @@ st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
 
 st.caption("🟡 MP = Max Pain | △ = Difference | ΔΔ = Strike-to-strike difference")
+
 
