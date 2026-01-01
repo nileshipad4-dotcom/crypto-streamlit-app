@@ -14,12 +14,8 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # -------------------------------------------------
 # AUTO REFRESH (60s)
 # -------------------------------------------------
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = datetime.utcnow()
+st_autorefresh(interval=60_000, key="auto_refresh")
 
-if (datetime.utcnow() - st.session_state.last_refresh).seconds >= 60:
-    st.session_state.last_refresh = datetime.utcnow()
-    st.rerun()
 
 # -------------------------------------------------
 # HELPERS
@@ -425,4 +421,5 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
