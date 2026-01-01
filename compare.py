@@ -280,6 +280,25 @@ for UNDERLYING in ASSETS:
         ]
     ].round(0).astype("Int64")
 
+
+     # -------------------------------------------------
+    # ATM HIGHLIGHT (RESTORED)
+    # -------------------------------------------------
+    atm_low = atm_high = None
+    if prices[UNDERLYING]:
+        strikes = final["strike_price"].astype(float).tolist()
+        below = [s for s in strikes if s <= prices[UNDERLYING]]
+        above = [s for s in strikes if s >= prices[UNDERLYING]]
+        if below:
+            atm_low = max(below)
+        if above:
+            atm_high = min(above)
+
+    def highlight_atm(row):
+        if row["strike_price"] in (atm_low, atm_high):
+            return ["background-color:#000435"] * len(row)
+        return [""] * len(row)
+        
     # -------------------------------------------------
     # DISPLAY
     # -------------------------------------------------
@@ -306,3 +325,4 @@ st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
 
 st.caption("🟡 MP = Max Pain | △ = Difference | ΔΔ = Strike-to-strike difference")
+
