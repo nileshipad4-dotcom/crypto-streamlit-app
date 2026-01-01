@@ -258,7 +258,7 @@ for UNDERLYING in ASSETS:
 
     def highlight(row):
         if row["strike_price"] in (atm_low, atm_high):
-            return ["background-color:#000435"] * len(row)
+            return ["background-color:#4B0082"] * len(row)
         if row[mp_cur] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
         return [""] * len(row)
@@ -289,3 +289,4 @@ st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+
