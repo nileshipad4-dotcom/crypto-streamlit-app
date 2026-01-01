@@ -302,6 +302,11 @@ for UNDERLYING in ASSETS:
         final["Current − Time1"].shift(-1) - final["Current − Time1"]
     )
 
+    final["ΔΔ MP 2"] = -1 * (
+    final["△ MP 2"].shift(-1) - final["△ MP 2"]
+    )
+
+
     final["Call Gamma △"] = (
         final["call_gamma_live"] - final["call_gamma_t1"]
     ) * FACTOR / 100
@@ -348,6 +353,7 @@ for UNDERLYING in ASSETS:
             "ΔΔ MP 1",
             f"MP ({t2})",
             "△ MP 2",
+             "ΔΔ MP 2",
             "Call Gamma △",
             "Put Gamma △",
             "Call Delta △",
@@ -423,6 +429,7 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
 
