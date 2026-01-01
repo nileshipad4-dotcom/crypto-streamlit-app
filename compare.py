@@ -224,15 +224,18 @@ for UNDERLYING in ASSETS:
     atm_high = min([s for s in strikes if s >= prices[UNDERLYING]], default=None)
     min_mp = final[mp_col].min()
 
+ 
     def highlight(row):
-        if row["strike_price"] in (atm_low, atm_high):
-            return ["background-color:#000435"] * len(row)
+        # 🔴 MAX PAIN — HIGHEST PRIORITY
         if not pd.isna(row[mp_col]) and row[mp_col] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
+    
+        # 🟡 ATM BAND — SECOND PRIORITY
+        if row["strike_price"] in (atm_low, atm_high):
+            return ["background-color:#000435;color:white"] * len(row)
+    
         return [""] * len(row)
 
-    st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True, height=700)
 
 # -------------------------------------------------
 # PCR TABLES
@@ -253,3 +256,4 @@ st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+
