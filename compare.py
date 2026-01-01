@@ -100,7 +100,6 @@ for UNDERLYING in ASSETS:
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    # ---------------- PCR ----------------
     def compute_pcr(d):
         return (
             d["put_oi"].sum() / d["call_oi"].sum() if d["call_oi"].sum() else None,
@@ -120,8 +119,8 @@ for UNDERLYING in ASSETS:
         ).json()["result"]
     )
 
-    df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
-    df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
+    # 🔧 FIX: force numeric
+    df_live["mark_price"] = pd.to_numeric(df_live["mark_price"], errors="coerce")
 
     pcr_rows.append([
         UNDERLYING,
@@ -135,27 +134,22 @@ for UNDERLYING in ASSETS:
         pcr_t2_vol,
     ])
 
-    # ---------------- MAX PAIN ----------------
-    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
-    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
-
-    df_t1 = df_t1.rename(columns={"value": t1})
-    df_t2 = df_t2.rename(columns={"value": t2})
+    # ---------------- HISTORICAL MP ----------------
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
 
-    # Live MP
+    # ---------------- LIVE MP ----------------
     mp_live = (
-        df_live.groupby("strike_price")["mark_price"]
-        .mean()
-        .reset_index(name="Current")
+        df_live.groupby("strike_price", as_index=False)["mark_price"]
+        .mean(numeric_only=True)
+        .rename(columns={"mark_price": "Current"})
     )
 
     final = merged.merge(mp_live, on="strike_price", how="left")
 
-    # -------------------------------------------------
-    # CALCULATIONS (ORDER FIXED)
-    # -------------------------------------------------
+    # ---------------- CALCULATIONS ----------------
     final["△ MP 1"] = final["Current"] - final[t1]
     final["△ MP 2"] = final[t1] - final[t2]
 
@@ -163,6 +157,7 @@ for UNDERLYING in ASSETS:
     final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
     now_ts = get_ist_time()
+
     final = final.rename(columns={
         "Current": f"MP ({now_ts})",
         t1: f"MP ({t1})",
@@ -182,9 +177,7 @@ for UNDERLYING in ASSETS:
         ]
     ].round(0)
 
-    # -------------------------------------------------
-    # ATM + LIVE MP HIGHLIGHT
-    # -------------------------------------------------
+    # ---------------- HIGHLIGHT ----------------
     price = prices[UNDERLYING]
     strikes = final["strike_price"].astype(float).tolist()
 
@@ -195,19 +188,14 @@ for UNDERLYING in ASSETS:
     mp_min = final[mp_col].min()
 
     def highlight(row):
-        styles = [""] * len(row)
         if row["strike_price"] in (atm_low, atm_high):
-            styles = ["background-color:#000435"] * len(row)
+            return ["background-color:#000435"] * len(row)
         if row[mp_col] == mp_min:
-            styles = ["background-color:#8B0000;color:white"] * len(row)
-        return styles
+            return ["background-color:#8B0000;color:white"] * len(row)
+        return [""] * len(row)
 
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(
-        final.style.apply(highlight, axis=1),
-        use_container_width=True,
-        height=700,
-    )
+    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True, height=700)
 
 # -------------------------------------------------
 # PCR TABLES
@@ -231,4 +219,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope change")
+st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = strike diff | ΔΔ = slope change")
