@@ -6,7 +6,6 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-
 # -------------------------------------------------
 # PAGE CONFIG
 # -------------------------------------------------
@@ -17,7 +16,6 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # AUTO REFRESH (60s)
 # -------------------------------------------------
 st_autorefresh(interval=60_000, key="auto_refresh")
-
 
 # -------------------------------------------------
 # HELPERS
@@ -47,13 +45,6 @@ CALL_OI_COL_IDX = 1
 PUT_OI_COL_IDX = 11
 CALL_VOL_COL_IDX = 2
 PUT_VOL_COL_IDX = 10
-
-CALL_GAMMA_COL_IDX = 3
-CALL_DELTA_COL_IDX = 4
-CALL_VEGA_COL_IDX = 5
-PUT_GAMMA_COL_IDX = 7
-PUT_DELTA_COL_IDX = 8
-PUT_VEGA_COL_IDX = 9
 
 FACTOR = 100_000_000
 
@@ -98,8 +89,7 @@ pcr_rows = []
 # =================================================
 for UNDERLYING in ASSETS:
 
-    CSV_PATH = f"data/{UNDERLYING}.csv"
-    df_raw = pd.read_csv(CSV_PATH)
+    df_raw = pd.read_csv(f"data/{UNDERLYING}.csv")
 
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
@@ -108,16 +98,12 @@ for UNDERLYING in ASSETS:
         "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
         "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
         "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
-        "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
-        "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
-        "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
-        "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
-        "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    # ---------------- PCR (CSV SNAPSHOT) ----------------
+    # -------------------------------------------------
+    # PCR (CSV SNAPSHOT)
+    # -------------------------------------------------
     def compute_pcr(d):
         return (
             d["put_oi"].sum() / d["call_oi"].sum() if d["call_oi"].sum() else None,
@@ -127,7 +113,9 @@ for UNDERLYING in ASSETS:
     pcr_t1_oi, pcr_t1_vol = compute_pcr(df[df["timestamp"] == t1])
     pcr_t2_oi, pcr_t2_vol = compute_pcr(df[df["timestamp"] == t2])
 
-    # ---------------- LIVE CHAIN ----------------
+    # -------------------------------------------------
+    # LIVE PCR
+    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -161,128 +149,26 @@ for UNDERLYING in ASSETS:
     ])
 
     # -------------------------------------------------
-    # HISTORICAL MAX PAIN
+    # MAX PAIN COMPARISON
     # -------------------------------------------------
-    df_t1 = (
-        df[df["timestamp"] == t1]
-        .groupby("strike_price", as_index=False)["value"]
-        .sum()
-        .rename(columns={"value": t1})
-    )
-
-    df_t2 = (
-        df[df["timestamp"] == t2]
-        .groupby("strike_price", as_index=False)["value"]
-        .sum()
-        .rename(columns={"value": t2})
-    )
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-    merged["Change"] = merged[t1] - merged[t2]
+    merged["△ MP 2"] = merged[t1] - merged[t2]
 
-    # ✅ FIX: ΔΔ MP 2 CALCULATED HERE (CORRECT PLACE)
-    merged["ΔΔ MP 2"] = -1 * (
-        merged["Change"].shift(-1) - merged["Change"]
-    )
+    # ΔΔ MP 2 (strike-wise)
+    merged["ΔΔ MP 2"] = -1 * (merged["△ MP 2"].shift(-1) - merged["△ MP 2"])
 
     # -------------------------------------------------
-    # LIVE MAX PAIN
+    # FINAL TABLE
     # -------------------------------------------------
-    df_mp = df_live[[
-        "strike_price",
-        "contract_type",
-        "mark_price",
-        "oi_contracts"
-    ]].copy()
-
-    for c in ["strike_price", "mark_price", "oi_contracts"]:
-        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
-
-    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
-    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
-
-    live_mp = (
-        pd.merge(
-            calls_mp.rename(columns={
-                "mark_price": "call_mark",
-                "oi_contracts": "call_oi"
-            }),
-            puts_mp.rename(columns={
-                "mark_price": "put_mark",
-                "oi_contracts": "put_oi"
-            }),
-            on="strike_price",
-            how="outer",
-        )
-        .sort_values("strike_price")
-    )
-
-    def compute_max_pain(df):
-        A = df["call_mark"].fillna(0).values
-        B = df["call_oi"].fillna(0).values
-        G = df["strike_price"].values
-        L = df["put_oi"].fillna(0).values
-        M = df["put_mark"].fillna(0).values
-
-        df["Current"] = [
-            round(
-                (
-                    -sum(A[i:] * B[i:])
-                    + G[i] * sum(B[:i])
-                    - sum(G[:i] * B[:i])
-                    - sum(M[:i] * L[:i])
-                    + sum(G[i:] * L[i:])
-                    - G[i] * sum(L[i:])
-                ) / 10000
-            )
-            for i in range(len(df))
-        ]
-        return df[["strike_price", "Current"]]
-
-    live_mp = compute_max_pain(live_mp)
-
-    # -------------------------------------------------
-    # FINAL MERGE
-    # -------------------------------------------------
-    final = (
-        merged
-        .merge(live_mp, on="strike_price", how="left")
-    )
-
-    final["Current − Time1"] = final["Current"] - final[t1]
-    final["ΔΔ MP 1"] = -1 * (
-        final["Current − Time1"].shift(-1) - final["Current − Time1"]
-    )
-
-    # -------------------------------------------------
-    # RENAME + ORDER
-    # -------------------------------------------------
-    now_ts = get_ist_time()
-
-    final = final.rename(columns={
-        "Current": f"MP ({now_ts})",
-        t1: f"MP ({t1})",
-        t2: f"MP ({t2})",
-        "Current − Time1": "△ MP 1",
-        "Change": "△ MP 2",
-    })
-
-    final = final[
-        [
-            "strike_price",
-            f"MP ({now_ts})",
-            f"MP ({t1})",
-            "△ MP 1",
-            "ΔΔ MP 1",
-            f"MP ({t2})",
-            "△ MP 2",
-            "ΔΔ MP 2",
-        ]
+    final = merged[
+        ["strike_price", t1, t2, "△ MP 2", "ΔΔ MP 2"]
     ].round(0).astype("Int64")
 
-
-     # -------------------------------------------------
-    # ATM HIGHLIGHT (RESTORED)
+    # -------------------------------------------------
+    # ATM HIGHLIGHT
     # -------------------------------------------------
     atm_low = atm_high = None
     if prices[UNDERLYING]:
@@ -298,33 +184,43 @@ for UNDERLYING in ASSETS:
         if row["strike_price"] in (atm_low, atm_high):
             return ["background-color:#000435"] * len(row)
         return [""] * len(row)
-        
+
     # -------------------------------------------------
     # DISPLAY
     # -------------------------------------------------
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final.style.apply(highlight_atm, axis=1), use_container_width=True)
-
+    st.dataframe(
+        final.style.apply(highlight_atm, axis=1),
+        use_container_width=True,
+        height=650,
+    )
 
 # -------------------------------------------------
-# PCR TABLE
+# PCR TABLES
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
     columns=[
         "Asset",
-        "PCR OI (Current)",
+        "PCR OI (Live)",
         "PCR OI (T1)",
         "PCR OI (T2)",
-        "PCR Vol (Current)",
+        "PCR Vol (Live)",
         "PCR Vol (T1)",
         "PCR Vol (T2)",
     ],
 ).set_index("Asset")
 
-st.subheader("📊 PCR Snapshot")
-st.dataframe(pcr_df.round(3), use_container_width=True)
+st.subheader("📊 PCR Snapshot — Open Interest")
+st.dataframe(
+    pcr_df[["PCR OI (Live)", "PCR OI (T1)", "PCR OI (T2)"]].round(3),
+    use_container_width=True,
+)
 
-st.caption("🟡 MP = Max Pain | △ = Difference | ΔΔ = Strike-to-strike difference")
+st.subheader("📊 PCR Snapshot — Volume")
+st.dataframe(
+    pcr_df[["PCR Vol (Live)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3),
+    use_container_width=True,
+)
 
-
+st.caption("🟡 ATM strikes highlighted | MP = Max Pain | △ = Time diff | ΔΔ = Strike diff")
