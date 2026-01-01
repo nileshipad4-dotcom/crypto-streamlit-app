@@ -4,6 +4,8 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh
+
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -421,5 +423,6 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | MP = Max Pain | △ = Live − Time1 | PCR shown above")
+
 
 
