@@ -28,43 +28,56 @@ def get_ist_datetime():
 def get_ist_time():
     return get_ist_datetime().strftime("%H:%M:%S")
 
-def get_ist_date():
-    return get_ist_datetime().date()
-
 # -------------------
-# EXPIRY LOGIC (AS REQUESTED)
+# ✅ FINAL EXPIRY LOGIC (NO EXPIRED, NO LEAKS)
 # -------------------
 def get_expiries():
     ist_now = get_ist_datetime()
     today = ist_now.date()
 
-    expiries = set()
-
-    # 🔥 Latest expiry logic
+    # ---- latest valid expiry ----
     if ist_now.time() <= datetime.strptime("17:30", "%H:%M").time():
-        latest = today
+        latest_valid = today
     else:
-        latest = today + timedelta(days=1)
+        latest_valid = today + timedelta(days=1)
 
-    expiries.add(latest.strftime("%d-%m-%Y"))
+    expiries = set()
+    expiries.add(latest_valid)
 
-    # 📅 All Fridays of current month
+    # ---- immediate upcoming Friday ----
+    d = today
+    while d.weekday() != calendar.FRIDAY:
+        d += timedelta(days=1)
+    if d >= latest_valid:
+        expiries.add(d)
+
+    # ---- all future Fridays of current month ----
     year, month = today.year, today.month
     cal = calendar.monthcalendar(year, month)
     for week in cal:
         if week[calendar.FRIDAY] != 0:
-            expiries.add(date(year, month, week[calendar.FRIDAY]).strftime("%d-%m-%Y"))
+            fd = date(year, month, week[calendar.FRIDAY])
+            if fd >= latest_valid:
+                expiries.add(fd)
 
-    # 📅 Last Friday of next 2 months
+    # ---- last Fridays of next 2 months ----
     for i in [1, 2]:
         m = month + i
         y = year + (m - 1) // 12
         m = ((m - 1) % 12) + 1
-        cal = calendar.monthcalendar(y, m)
-        last_friday = max(week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0)
-        expiries.add(date(y, m, last_friday).strftime("%d-%m-%Y"))
 
-    return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+        cal = calendar.monthcalendar(y, m)
+        last_friday = max(
+            week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0
+        )
+        lf = date(y, m, last_friday)
+        if lf >= latest_valid:
+            expiries.add(lf)
+
+    return sorted(
+        [d.strftime("%d-%m-%Y") for d in expiries],
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y")
+    )
 
 # -------------------
 # LIVE PRICE FROM DELTA
@@ -149,7 +162,6 @@ def compute_max_pain(df):
 st.title("📈 Crypto Option Chain — Max Pain")
 
 selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS)
-
 expiry_list = get_expiries()
 selected_expiry = st.sidebar.selectbox("Expiry", expiry_list)
 
@@ -195,11 +207,8 @@ df_final = (
 # -------------------
 max_pain_strike = df_final.loc[df_final["max_pain"].idxmin(), "strike_price"]
 
-lower_strike = None
-upper_strike = None
-if spot_price:
-    lower_strike = df_final[df_final["strike_price"] <= spot_price]["strike_price"].max()
-    upper_strike = df_final[df_final["strike_price"] >= spot_price]["strike_price"].min()
+lower_strike = df_final[df_final["strike_price"] <= spot_price]["strike_price"].max()
+upper_strike = df_final[df_final["strike_price"] >= spot_price]["strike_price"].min()
 
 def highlight_rows(row):
     if row["strike_price"] == max_pain_strike:
@@ -212,9 +221,9 @@ def highlight_rows(row):
 # DISPLAY
 # -------------------
 st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
-st.caption(f"IST Time: {get_ist_time()} • Spot range (indigo) • Max Pain (red)")
+st.caption(f"IST {get_ist_time()} • Spot range (indigo) • Max Pain (red)")
 
 styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
 
-st.caption("Expiry logic: Intraday-aware • Fridays current month • Last Fridays next 2 months • Delta Exchange")
+st.caption("Expiry logic: intraday-aware • no expired dates • immediate Friday ensured • Delta Exchange")
