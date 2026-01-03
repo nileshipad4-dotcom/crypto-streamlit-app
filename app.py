@@ -212,9 +212,9 @@ upper_strike = df_final[df_final["strike_price"] >= spot_price]["strike_price"].
 
 def highlight_rows(row):
     if row["strike_price"] == max_pain_strike:
-        return ["background-color: #f8d7da"] * len(row)  # red
+        return ["background-color: #960018"] * len(row)  # red
     if row["strike_price"] in [lower_strike, upper_strike]:
-        return ["background-color: #e0e7ff"] * len(row)  # indigo
+        return ["background-color: #4B0082"] * len(row)  # indigo
     return [""] * len(row)
 
 # -------------------
@@ -227,3 +227,4 @@ styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
 
 st.caption("Expiry logic: intraday-aware • no expired dates • immediate Friday ensured • Delta Exchange")
+
