@@ -4,7 +4,6 @@ import os
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # =================================================
@@ -15,6 +14,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 BTC_PATH = os.path.join(DATA_DIR, "BTC.csv")
 ETH_PATH = os.path.join(DATA_DIR, "ETH.csv")
+TS_PATH = os.path.join(DATA_DIR, "timestamps.csv")
 
 # =================================================
 # PAGE CONFIG
@@ -30,11 +30,6 @@ refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 # =================================================
 # HELPERS
 # =================================================
-def get_ist_time_HHMM():
-    utc_now = datetime.utcnow()
-    ist_now = utc_now + timedelta(hours=5, minutes=30)
-    return ist_now.strftime("%H:%M")
-
 def rotated_time_sort(times, pivot="17:30"):
     pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
     def key(t):
@@ -53,24 +48,35 @@ EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
 # =================================================
-# LIVE TIMESTAMP MANAGEMENT (STREAMLIT-SAFE)
+# LOAD TIMESTAMPS (BOOTSTRAP FROM CSV)
 # =================================================
-current_ts = get_ist_time_HHMM()
-
 if "timestamps" not in st.session_state:
-    st.session_state.timestamps = []
 
-# add new timestamp if changed
-if current_ts not in st.session_state.timestamps:
-    st.session_state.timestamps.insert(0, current_ts)
+    if not os.path.exists(TS_PATH):
+        st.error("❌ timestamps.csv not found. Run collector.py first.")
+        st.stop()
 
-# keep last 20 snapshots only
-timestamps = st.session_state.timestamps[:20]
+    df_ts = pd.read_csv(TS_PATH)
 
-st.caption(f"⏱ Live timestamps tracked: {timestamps}")
+    if "timestamp" not in df_ts.columns or df_ts.empty:
+        st.error("❌ timestamps.csv is empty or malformed.")
+        st.stop()
+
+    st.session_state.timestamps = rotated_time_sort(
+        df_ts["timestamp"].astype(str).tolist()
+    )
+
+# -------------------------------------------------
+# DISPLAY DEBUG (temporary – you can remove later)
+# -------------------------------------------------
+st.caption(
+    f"🔁 Refresh #{refresh_count} | timestamps in state: {len(st.session_state.timestamps)}"
+)
+
+timestamps = st.session_state.timestamps
 
 if len(timestamps) < 2:
-    st.warning("Waiting for at least 2 snapshots…")
+    st.warning("⏳ Waiting for at least 2 timestamps…")
     st.stop()
 
 # =================================================
@@ -122,9 +128,7 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         st.error(f"timestamp_IST missing in {UNDERLYING}.csv")
         continue
 
-    # -------------------------------------------------
-    # PCR (HISTORICAL)
-    # -------------------------------------------------
+    # PCR (historical)
     pcr_t1_oi = safe_ratio(
         df[df["timestamp_IST"] == t1]["put_oi"].sum(),
         df[df["timestamp_IST"] == t1]["call_oi"].sum(),
@@ -143,9 +147,7 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         df[df["timestamp_IST"] == t2]["call_volume"].sum(),
     )
 
-    # -------------------------------------------------
     # LIVE PCR
-    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}"
@@ -178,9 +180,7 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         pcr_t2_vol,
     ])
 
-    # -------------------------------------------------
     # MAX PAIN COMPARISON
-    # -------------------------------------------------
     df_t1 = df[df["timestamp_IST"] == t1].groupby("strike_price", as_index=False)["max_pain"].sum()
     df_t2 = df[df["timestamp_IST"] == t2].groupby("strike_price", as_index=False)["max_pain"].sum()
 
@@ -212,4 +212,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟢 Live timestamps managed inside Streamlit (Cloud-safe)")
+st.caption("🟢 timestamps.csv used for bootstrap, session_state for live")
