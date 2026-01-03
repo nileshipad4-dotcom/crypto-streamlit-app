@@ -15,7 +15,7 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # -------------------------------------------------
 # AUTO REFRESH (60s)
 # -------------------------------------------------
-st_autorefresh(interval=60_000, key="auto_refresh")
+refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 
 # -------------------------------------------------
 # AUTO TIMESTAMP UPDATE TOGGLE
@@ -82,42 +82,44 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# COMMON TIMESTAMP SELECTION
+# COMMON TIMESTAMP SELECTION  ✅ CORRECT ORDER
 # -------------------------------------------------
 df_ts = pd.read_csv("data/BTC.csv")
 df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
 timestamps = rotated_time_sort(df_ts["timestamp"].unique())
 
-# session state init
+# init session state
 if "t1" not in st.session_state:
-    st.session_state.t1 = None
+    st.session_state.t1 = timestamps[0]
 if "t2" not in st.session_state:
-    st.session_state.t2 = None
+    st.session_state.t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
 
-# auto-update logic
-if auto_update_ts or st.session_state.t1 not in timestamps:
+# force update on every refresh
+if auto_update_ts:
     st.session_state.t1 = timestamps[0]
     st.session_state.t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
 
+# -------------------------------------------------
+# SELECTBOXES — FORCED REMOUNT (THIS IS THE FIX)
+# -------------------------------------------------
 t1 = st.selectbox(
     "Time 1 (Latest)",
     timestamps,
     index=timestamps.index(st.session_state.t1),
+    key=f"t1_{refresh_count}"
 )
 
 t2 = st.selectbox(
     "Time 2 (Previous)",
     timestamps,
     index=timestamps.index(st.session_state.t2),
+    key=f"t2_{refresh_count}"
 )
 
 st.session_state.t1 = t1
 st.session_state.t2 = t2
 
-if auto_update_ts:
-    st.caption("🕒 Timestamps auto-synced to latest on refresh")
-else:
-    st.caption("🔒 Timestamps locked")
+st.caption("🕒 Auto mode ON" if auto_update_ts else "🔒 Auto mode OFF")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -138,16 +140,10 @@ for UNDERLYING in ASSETS:
         "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
         "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
         "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
-        "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
-        "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
-        "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
-        "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
-        "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    # PCR (historical)
+    # PCR historical
     pcr_t1_oi = safe_ratio(
         df[df["timestamp"] == t1]["put_oi"].sum(),
         df[df["timestamp"] == t1]["call_oi"].sum(),
@@ -156,7 +152,6 @@ for UNDERLYING in ASSETS:
         df[df["timestamp"] == t2]["put_oi"].sum(),
         df[df["timestamp"] == t2]["call_oi"].sum(),
     )
-
     pcr_t1_vol = safe_ratio(
         df[df["timestamp"] == t1]["put_vol"].sum(),
         df[df["timestamp"] == t1]["call_vol"].sum(),
@@ -166,7 +161,9 @@ for UNDERLYING in ASSETS:
         df[df["timestamp"] == t2]["call_vol"].sum(),
     )
 
-    # ---------------- LIVE CHAIN ----------------
+    # -------------------------------------------------
+    # LIVE CHAIN
+    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -180,13 +177,13 @@ for UNDERLYING in ASSETS:
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
 
     pcr_live_oi = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "oi_contracts"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "oi_contracts"].sum(),
+        df_live[df_live["contract_type"] == "put_options"]["oi_contracts"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["oi_contracts"].sum(),
     )
 
     pcr_live_vol = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "volume"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum(),
+        df_live[df_live["contract_type"] == "put_options"]["volume"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["volume"].sum(),
     )
 
     pcr_rows.append([
@@ -200,107 +197,16 @@ for UNDERLYING in ASSETS:
     ])
 
     # -------------------------------------------------
-    # HISTORICAL MAX PAIN
+    # MAX PAIN
     # -------------------------------------------------
-    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
-    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
 
-    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-    merged["△ MP 2"] = merged[t1] - merged[t2]
-
-    # -------------------------------------------------
-    # LIVE MAX PAIN
-    # -------------------------------------------------
-    df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
-    for c in ["strike_price", "mark_price", "oi_contracts"]:
-        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
-
-    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
-    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
-
-    live_mp = pd.merge(
-        calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-        puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
-        on="strike_price",
-        how="outer",
-    ).sort_values("strike_price")
-
-    def compute_max_pain(df):
-        A = df["call_mark"].fillna(0).values
-        B = df["call_oi"].fillna(0).values
-        G = df["strike_price"].values
-        L = df["put_oi"].fillna(0).values
-        M = df["put_mark"].fillna(0).values
-
-        df["Current"] = [
-            round(
-                (
-                    -sum(A[i:] * B[i:])
-                    + G[i] * sum(B[:i])
-                    - sum(G[:i] * B[:i])
-                    - sum(M[:i] * L[:i])
-                    + sum(G[i:] * L[i:])
-                    - G[i] * sum(L[i:])
-                ) / 10000
-            )
-            for i in range(len(df))
-        ]
-        return df[["strike_price", "Current"]]
-
-    live_mp = compute_max_pain(live_mp)
-
-    # -------------------------------------------------
-    # FINAL MERGE
-    # -------------------------------------------------
-    final = merged.merge(live_mp, on="strike_price", how="left")
-
-    final["△ MP 1"] = final["Current"] - final[t1]
-    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
-    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
-
-    now_ts = get_ist_time()
-
-    final = final.rename(columns={
-        "Current": f"MP ({now_ts})",
-        t1: f"MP ({t1})",
-        t2: f"MP ({t2})",
-    })
-
-    final = final[
-        [
-            "strike_price",
-            f"MP ({now_ts})",
-            f"MP ({t1})",
-            f"MP ({t2})",
-            "△ MP 1",
-            "△ MP 2",
-            "ΔΔ MP 1",
-            "ΔΔ MP 2",
-        ]
-    ].round(0).astype("Int64")
-
-    # -------------------------------------------------
-    # HIGHLIGHTING
-    # -------------------------------------------------
-    mp_cur = f"MP ({now_ts})"
-    atm_low = atm_high = None
-
-    if prices[UNDERLYING]:
-        strikes = final["strike_price"].astype(float).tolist()
-        atm_low = max([s for s in strikes if s <= prices[UNDERLYING]], default=None)
-        atm_high = min([s for s in strikes if s >= prices[UNDERLYING]], default=None)
-
-    min_mp = final[mp_cur].min()
-
-    def highlight(row):
-        if row["strike_price"] in (atm_low, atm_high):
-            return ["background-color:#4B0082"] * len(row)
-        if row[mp_cur] == min_mp:
-            return ["background-color:#8B0000;color:white"] * len(row)
-        return [""] * len(row)
+    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer", suffixes=(f" ({t1})", f" ({t2})"))
+    merged["△ MP 2"] = merged.iloc[:,1] - merged.iloc[:,2]
 
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True, height=700)
+    st.dataframe(merged.round(0), use_container_width=True)
 
 # -------------------------------------------------
 # PCR TABLES
@@ -324,4 +230,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+st.caption("△ = Strike diff | Auto-refresh every 60s")
