@@ -9,7 +9,7 @@ import calendar
 # CONFIG
 # -------------------
 UNDERLYINGS = ["BTC", "ETH"]
-REFRESH_SECONDS = 60
+REFRESH_SECONDS = 360
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 HEADERS = {"Accept": "application/json"}
 
@@ -226,3 +226,4 @@ styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
 
 st.caption("Expiry logic: intraday-aware • no expired dates • immediate Friday ensured • Delta Exchange")
+
