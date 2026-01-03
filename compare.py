@@ -37,7 +37,7 @@ def safe_ratio(a, b):
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "04-01-2026"
+EXPIRY = "30-01-2026"
 ASSETS = ["BTC", "ETH"]
 
 STRIKE_COL_IDX = 6
@@ -311,4 +311,5 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+
 
