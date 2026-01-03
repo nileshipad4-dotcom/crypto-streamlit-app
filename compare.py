@@ -13,15 +13,15 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # -------------------------------------------------
-# AUTO REFRESH
+# AUTO REFRESH (60s)
 # -------------------------------------------------
-refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
+st_autorefresh(interval=60_000, key="auto_refresh")
 
 # -------------------------------------------------
-# AUTO TIMESTAMP TOGGLE
+# AUTO TIMESTAMP MODE
 # -------------------------------------------------
 auto_update_ts = st.checkbox(
-    "🔄 Auto-update timestamps on every refresh",
+    "🔄 Auto-update timestamps on refresh",
     value=True
 )
 
@@ -65,6 +65,41 @@ PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
 
 # -------------------------------------------------
+# TIMESTAMP MASTER UPDATE (KEY FIX)
+# -------------------------------------------------
+def update_timestamp_master():
+    df = pd.read_csv("data/BTC.csv")
+    ts = (
+        df.iloc[:, TIMESTAMP_COL_IDX]
+        .astype(str)
+        .str[:5]
+        .dropna()
+        .unique()
+    )
+    pd.DataFrame({"timestamp": ts}).to_csv(
+        "data/timestamps.csv", index=False
+    )
+
+update_timestamp_master()
+
+# -------------------------------------------------
+# LOAD TIMESTAMPS (SINGLE SOURCE OF TRUTH)
+# -------------------------------------------------
+df_ts = pd.read_csv("data/timestamps.csv")
+timestamps = rotated_time_sort(df_ts["timestamp"].tolist())
+
+# -------------------------------------------------
+# TIMESTAMP SELECTION (STABLE)
+# -------------------------------------------------
+if auto_update_ts:
+    t1 = timestamps[0]
+    t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
+    st.caption(f"🕒 Auto mode: {t1} vs {t2}")
+else:
+    t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
+    t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+
+# -------------------------------------------------
 # LIVE PRICE
 # -------------------------------------------------
 @st.cache_data(ttl=10)
@@ -80,43 +115,6 @@ prices = {a: get_delta_price(a) for a in ASSETS}
 c1, c2 = st.columns(2)
 c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
-
-# -------------------------------------------------
-# TIMESTAMP SELECTION (CORRECT ORDER)
-# -------------------------------------------------
-df_ts = pd.read_csv("data/BTC.csv")
-df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
-timestamps = rotated_time_sort(df_ts["timestamp"].unique())
-
-if "t1" not in st.session_state:
-    st.session_state.t1 = timestamps[0]
-if "t2" not in st.session_state:
-    st.session_state.t2 = timestamps[1]
-
-# 🔑 force update BEFORE widget creation
-if auto_update_ts:
-    st.session_state.t1 = timestamps[0]
-    st.session_state.t2 = timestamps[1]
-
-# 🔑 remount widgets
-t1 = st.selectbox(
-    "Time 1 (Latest)",
-    timestamps,
-    index=timestamps.index(st.session_state.t1),
-    key=f"t1_{refresh_count}"
-)
-
-t2 = st.selectbox(
-    "Time 2 (Previous)",
-    timestamps,
-    index=timestamps.index(st.session_state.t2),
-    key=f"t2_{refresh_count}"
-)
-
-st.session_state.t1 = t1
-st.session_state.t2 = t2
-
-st.caption("🕒 Auto timestamps ON" if auto_update_ts else "🔒 Auto timestamps OFF")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -156,7 +154,9 @@ for UNDERLYING in ASSETS:
     pcr_t2_vol = safe_ratio(df[df["timestamp"] == t2]["put_vol"].sum(),
                             df[df["timestamp"] == t2]["call_vol"].sum())
 
+    # -------------------------------------------------
     # LIVE CHAIN
+    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -189,7 +189,9 @@ for UNDERLYING in ASSETS:
         pcr_t2_vol,
     ])
 
-    # ================= MAX PAIN =================
+    # -------------------------------------------------
+    # MAX PAIN (FULL LOGIC RESTORED)
+    # -------------------------------------------------
     df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
     df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
 
