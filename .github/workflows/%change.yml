@@ -1,4 +1,5 @@
-name: Collect Option Chain Data
+name: Crypro % change
+
 
 on:
   schedule:
