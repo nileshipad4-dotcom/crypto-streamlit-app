@@ -25,26 +25,6 @@ def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
 
 # -------------------
-# EXPIRIES
-# -------------------
-def get_expiries(months=3):
-    today = datetime.utcnow().date()
-    end = today + timedelta(days=months * 31)
-
-    expiries = set()
-
-    # upcoming expiry (next available date)
-    expiries.add(today.strftime("%d-%m-%Y"))
-
-    d = today
-    while d <= end:
-        if d.weekday() == 4:  # Friday
-            expiries.add(d.strftime("%d-%m-%Y"))
-        d += timedelta(days=1)
-
-    return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
-
-# -------------------
 # LIVE PRICE FROM DELTA
 # -------------------
 @st.cache_data(ttl=10)
@@ -56,6 +36,41 @@ def get_delta_price(symbol):
         return float(ticker["mark_price"])
     except:
         return None
+
+# -------------------
+# ✅ CORRECT EXPIRY FETCH (NO EXPIRED ONES)
+# -------------------
+@st.cache_data(ttl=300)
+def get_valid_expiries(underlying: str):
+    """
+    Fetch only expiries that still have LIVE option contracts.
+    This automatically removes already-expired intraday expiries.
+    """
+    r = requests.get(API_BASE, timeout=20).json().get("result", [])
+
+    valid_expiries = set()
+
+    for x in r:
+        if x.get("underlying_asset", {}).get("symbol") != underlying:
+            continue
+
+        expiry = x.get("expiry_date")
+        mark = x.get("mark_price")
+
+        # ignore expired / dead contracts
+        if not expiry or mark is None:
+            continue
+
+        try:
+            mark = float(mark)
+        except:
+            continue
+
+        # live contracts always have mark_price > 0
+        if mark > 0:
+            valid_expiries.add(expiry)
+
+    return sorted(valid_expiries, key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
 
 # -------------------
 # FETCH OPTION DATA
@@ -128,8 +143,13 @@ st.title("📈 Crypto Option Chain — Max Pain")
 
 selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS)
 
-expiry_list = get_expiries()
-selected_expiry = st.sidebar.selectbox("Expiry", expiry_list)
+expiry_list = get_valid_expiries(selected_underlying)
+
+if not expiry_list:
+    st.error("No valid expiries found from Delta.")
+    st.stop()
+
+selected_expiry = st.sidebar.selectbox("Expiry (Live Only)", expiry_list, index=0)
 
 auto_refresh = st.sidebar.checkbox("Auto-refresh", True)
 
@@ -160,7 +180,6 @@ df = df.sort_values("strike_price").reset_index(drop=True)
 df["Δ max_pain"] = df["max_pain"].diff()
 df["Δ² max_pain"] = df["Δ max_pain"].diff()
 
-# Final table (integers)
 df_final = (
     df[["strike_price", "max_pain", "Δ max_pain", "Δ² max_pain"]]
     .round(0)
@@ -172,11 +191,8 @@ df_final = (
 # -------------------
 max_pain_strike = df_final.loc[df_final["max_pain"].idxmin(), "strike_price"]
 
-lower_strike = None
-upper_strike = None
-if spot_price:
-    lower_strike = df_final[df_final["strike_price"] <= spot_price]["strike_price"].max()
-    upper_strike = df_final[df_final["strike_price"] >= spot_price]["strike_price"].min()
+lower_strike = df_final[df_final["strike_price"] <= spot_price]["strike_price"].max()
+upper_strike = df_final[df_final["strike_price"] >= spot_price]["strike_price"].min()
 
 def highlight_rows(row):
     if row["strike_price"] == max_pain_strike:
@@ -189,9 +205,9 @@ def highlight_rows(row):
 # DISPLAY
 # -------------------
 st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
-st.caption(f"Spot range highlighted (indigo) • Max Pain (red) • IST {get_ist_time()}")
+st.caption(f"Spot range (indigo) • Max Pain (red) • IST {get_ist_time()}")
 
 styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
 
-st.caption("Max Pain ladder • Δ and Δ² show curvature of pain distribution • Delta Exchange")
+st.caption("Only LIVE expiries shown • Delta Exchange")
