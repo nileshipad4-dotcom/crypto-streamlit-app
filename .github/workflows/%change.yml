@@ -1,48 +1,32 @@
-name: Crypro % change
-
+name: Crypto 5m Change CSV
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"   # Run every 10 minutes
-  workflow_dispatch:          # Allow manual triggering
-
-permissions:
-  contents: write             # Required for GitHub Actions to push
+    - cron: "*/5 * * * *"   # every 5 minutes
 
 jobs:
-  run-script:
+  run:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0     # IMPORTANT: allows pull --rebase to work
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          python -m pip install --upgrade pip
-          pip install pandas requests
+          pip install -r requirements.txt
 
-      - name: Run %change script
-        run: python %change.py
-
-      - name: Commit & Push updated data
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run script
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python crypto_5m_change_csv.py
 
-          git add data/*
-          git commit -m "data update $(date -u +"%Y-%m-%d %H:%M:%S UTC")" || echo "No changes to commit"
-
-          # FIX: Prevent push failures when repo is updated
-          git pull --rebase
-
-          git push
+      - name: Upload CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto_csv
+          path: "*.csv"
