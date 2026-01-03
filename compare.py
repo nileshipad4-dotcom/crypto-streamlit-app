@@ -4,7 +4,6 @@ import os
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # =================================================
@@ -17,8 +16,6 @@ BTC_PATH = os.path.join(DATA_DIR, "BTC.csv")
 ETH_PATH = os.path.join(DATA_DIR, "ETH.csv")
 TS_PATH = os.path.join(DATA_DIR, "timestamps.csv")
 
-os.makedirs(DATA_DIR, exist_ok=True)
-
 # =================================================
 # PAGE CONFIG
 # =================================================
@@ -26,7 +23,7 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # =================================================
-# AUTO REFRESH
+# AUTO REFRESH (60s)
 # =================================================
 st_autorefresh(interval=60_000, key="auto_refresh")
 
@@ -56,51 +53,26 @@ EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
 # =================================================
-# TIMESTAMP MASTER (CORRECT – ALIGNED WITH COLLECTOR)
-# =================================================
-def update_timestamp_master():
-    if not os.path.exists(BTC_PATH):
-        st.error("❌ BTC.csv not found")
-        return
-
-    df = pd.read_csv(BTC_PATH)
-
-    if "timestamp_IST" not in df.columns:
-        st.error("❌ timestamp_IST column missing in BTC.csv")
-        return
-
-    timestamps = (
-        df["timestamp_IST"]
-        .astype(str)
-        .dropna()
-        .unique()
-    )
-
-    pd.DataFrame({"timestamp": timestamps}).to_csv(TS_PATH, index=False)
-
-    st.caption(
-        f"✅ timestamps.csv updated | rows={len(timestamps)} | latest={max(timestamps)}"
-    )
-
-# =================================================
-# UPDATE TIMESTAMPS EVERY RUN
-# =================================================
-update_timestamp_master()
-
-# =================================================
-# LOAD TIMESTAMPS
+# LOAD TIMESTAMPS (FROM COLLECTOR)
 # =================================================
 if not os.path.exists(TS_PATH):
+    st.error("❌ timestamps.csv not found. Run collector.py first.")
     st.stop()
 
 df_ts = pd.read_csv(TS_PATH)
-timestamps = rotated_time_sort(df_ts["timestamp"].tolist())
+
+if "timestamp" not in df_ts.columns or df_ts.empty:
+    st.error("❌ timestamps.csv is empty or malformed.")
+    st.stop()
+
+timestamps = rotated_time_sort(df_ts["timestamp"].astype(str).tolist())
 
 if len(timestamps) < 2:
+    st.warning("⏳ Waiting for at least 2 timestamps...")
     st.stop()
 
 # =================================================
-# TIMESTAMP SELECTION (STABLE)
+# TIMESTAMP SELECTION
 # =================================================
 if auto_update_ts:
     t1 = timestamps[0]
@@ -118,7 +90,7 @@ def get_price(symbol):
     try:
         r = requests.get(API_BASE, timeout=10).json()["result"]
         return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
-    except:
+    except Exception:
         return None
 
 prices = {a: get_price(a) for a in ASSETS}
@@ -137,9 +109,19 @@ pcr_rows = []
 # =================================================
 for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
 
+    if not os.path.exists(PATH):
+        st.warning(f"⚠️ {UNDERLYING}.csv not found")
+        continue
+
     df = pd.read_csv(PATH)
 
-    # PCR historical
+    if "timestamp_IST" not in df.columns:
+        st.error(f"❌ timestamp_IST missing in {UNDERLYING}.csv")
+        continue
+
+    # -------------------------------------------------
+    # PCR (HISTORICAL)
+    # -------------------------------------------------
     pcr_t1_oi = safe_ratio(
         df[df["timestamp_IST"] == t1]["put_oi"].sum(),
         df[df["timestamp_IST"] == t1]["call_oi"].sum(),
@@ -160,10 +142,13 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         df[df["timestamp_IST"] == t2]["call_volume"].sum(),
     )
 
+    # -------------------------------------------------
     # LIVE PCR
+    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
-            f"{API_BASE}?contract_types=call_options,put_options"
+            f"{API_BASE}"
+            f"?contract_types=call_options,put_options"
             f"&underlying_asset_symbols={UNDERLYING}"
             f"&expiry_date={EXPIRY}",
             timeout=20
@@ -193,11 +178,20 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         pcr_t2_vol,
     ])
 
-    # =================================================
-    # MAX PAIN COMPARISON (HISTORICAL)
-    # =================================================
-    df_t1 = df[df["timestamp_IST"] == t1].groupby("strike_price", as_index=False)["max_pain"].sum()
-    df_t2 = df[df["timestamp_IST"] == t2].groupby("strike_price", as_index=False)["max_pain"].sum()
+    # -------------------------------------------------
+    # MAX PAIN COMPARISON
+    # -------------------------------------------------
+    df_t1 = (
+        df[df["timestamp_IST"] == t1]
+        .groupby("strike_price", as_index=False)["max_pain"]
+        .sum()
+    )
+
+    df_t2 = (
+        df[df["timestamp_IST"] == t2]
+        .groupby("strike_price", as_index=False)["max_pain"]
+        .sum()
+    )
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["△ MP"] = merged.iloc[:, 1] - merged.iloc[:, 2]
@@ -227,4 +221,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟢 Source of truth: timestamp_IST from collector.py")
+st.caption("🟢 Source of truth: collector.py (timestamp_IST + timestamps.csv)")
