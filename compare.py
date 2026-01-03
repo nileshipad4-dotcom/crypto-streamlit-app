@@ -23,9 +23,9 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # =================================================
-# AUTO REFRESH (60s)
+# AUTO REFRESH (CACHE BUSTER)
 # =================================================
-st_autorefresh(interval=60_000, key="auto_refresh")
+refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 
 # =================================================
 # AUTO TIMESTAMP MODE
@@ -53,19 +53,27 @@ EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
 # =================================================
-# LOAD TIMESTAMPS (FROM COLLECTOR)
+# LOAD TIMESTAMPS (FORCED RELOAD EVERY REFRESH)
 # =================================================
 if not os.path.exists(TS_PATH):
     st.error("❌ timestamps.csv not found. Run collector.py first.")
     st.stop()
 
+# ---- FORCE pandas to reload file every time ----
 df_ts = pd.read_csv(TS_PATH)
 
 if "timestamp" not in df_ts.columns or df_ts.empty:
     st.error("❌ timestamps.csv is empty or malformed.")
     st.stop()
 
-timestamps = rotated_time_sort(df_ts["timestamp"].astype(str).tolist())
+timestamps = rotated_time_sort(
+    df_ts["timestamp"]
+    .astype(str)
+    .copy()          # <-- CRITICAL: breaks pandas/Streamlit reuse
+    .tolist()
+)
+
+st.caption(f"🔁 Refresh #{refresh_count} | timestamps loaded: {len(timestamps)}")
 
 if len(timestamps) < 2:
     st.warning("⏳ Waiting for at least 2 timestamps...")
@@ -221,4 +229,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟢 Source of truth: collector.py (timestamp_IST + timestamps.csv)")
+st.caption("🟢 Source of truth: collector.py → timestamps.csv")
