@@ -38,39 +38,39 @@ def get_delta_price(symbol):
         return None
 
 # -------------------
-# ✅ CORRECT EXPIRY FETCH (NO EXPIRED ONES)
+# ✅ CORRECT EXPIRY FETCH (DELTA-SAFE)
 # -------------------
 @st.cache_data(ttl=300)
 def get_valid_expiries(underlying: str):
     """
-    Fetch only expiries that still have LIVE option contracts.
-    This automatically removes already-expired intraday expiries.
+    Delta crypto options:
+    - expire intraday
+    - today's expiry is NOT tradable
+    Rule: show only dates strictly AFTER today
     """
     r = requests.get(API_BASE, timeout=20).json().get("result", [])
 
-    valid_expiries = set()
+    today = datetime.utcnow().date()
+    expiries = set()
 
     for x in r:
         if x.get("underlying_asset", {}).get("symbol") != underlying:
             continue
 
         expiry = x.get("expiry_date")
-        mark = x.get("mark_price")
-
-        # ignore expired / dead contracts
-        if not expiry or mark is None:
+        if not expiry:
             continue
 
         try:
-            mark = float(mark)
+            expiry_date = datetime.strptime(expiry, "%d-%m-%Y").date()
         except:
             continue
 
-        # live contracts always have mark_price > 0
-        if mark > 0:
-            valid_expiries.add(expiry)
+        # ✅ STRICTLY FUTURE ONLY
+        if expiry_date > today:
+            expiries.add(expiry)
 
-    return sorted(valid_expiries, key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
+    return sorted(expiries, key=lambda d: datetime.strptime(d, "%d-%m-%Y"))
 
 # -------------------
 # FETCH OPTION DATA
@@ -146,10 +146,14 @@ selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS)
 expiry_list = get_valid_expiries(selected_underlying)
 
 if not expiry_list:
-    st.error("No valid expiries found from Delta.")
+    st.error("No valid future expiries available on Delta.")
     st.stop()
 
-selected_expiry = st.sidebar.selectbox("Expiry (Live Only)", expiry_list, index=0)
+selected_expiry = st.sidebar.selectbox(
+    "Expiry (Live)",
+    expiry_list,
+    index=0
+)
 
 auto_refresh = st.sidebar.checkbox("Auto-refresh", True)
 
@@ -161,13 +165,6 @@ st.sidebar.metric(
     f"{selected_underlying} Spot",
     f"{spot_price:,.0f}" if spot_price else "Error"
 )
-
-if auto_refresh:
-    try:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=REFRESH_SECONDS * 1000, key="refresh")
-    except:
-        pass
 
 # -------------------
 # PROCESS
@@ -205,9 +202,7 @@ def highlight_rows(row):
 # DISPLAY
 # -------------------
 st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
-st.caption(f"Spot range (indigo) • Max Pain (red) • IST {get_ist_time()}")
+st.caption(f"Only FUTURE expiries shown • Spot range (indigo) • Max Pain (red) • IST {get_ist_time()}")
 
 styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
-
-st.caption("Only LIVE expiries shown • Delta Exchange")
