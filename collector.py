@@ -5,12 +5,14 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-headers = {"Accept": "application/json"}
+# -------------------------------------------------
+# CONFIG
+# -------------------------------------------------
+API_DELTA = "https://api.india.delta.exchange/v2/tickers"
+HEADERS = {"Accept": "application/json"}
 
 EXPIRIES = ["03-01-2026"]
 UNDERLYINGS = ["BTC", "ETH"]
-
-API_DELTA = "https://api.india.delta.exchange/v2/tickers"
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -23,7 +25,7 @@ TIMESTAMPS_PATH = os.path.join(DATA_DIR, "timestamps.csv")
 def safe_to_numeric(val):
     try:
         return pd.to_numeric(val)
-    except:
+    except Exception:
         return val
 
 
@@ -39,18 +41,19 @@ def get_ist_time_HHMM():
 def fetch_single_expiry(underlying, expiry_date):
 
     url = (
-        API_DELTA
+        f"{API_DELTA}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={underlying}"
         f"&expiry_date={expiry_date}"
     )
 
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=HEADERS, timeout=20)
     if r.status_code != 200:
         return pd.DataFrame()
 
     raw = r.json().get("result", [])
     df = pd.json_normalize(raw)
+
     if df.empty:
         return pd.DataFrame()
 
@@ -100,11 +103,11 @@ def fetch_single_expiry(underlying, expiry_date):
 
     merged = merged[
         [
-            "call_mark","call_oi","call_volume",
-            "call_gamma","call_delta","call_vega",
+            "call_mark", "call_oi", "call_volume",
+            "call_gamma", "call_delta", "call_vega",
             "strike_price",
-            "put_gamma","put_delta","put_vega",
-            "put_volume","put_oi","put_mark"
+            "put_gamma", "put_delta", "put_vega",
+            "put_volume", "put_oi", "put_mark"
         ]
     ]
 
@@ -144,7 +147,7 @@ def main():
 
     ts = get_ist_time_HHMM()
 
-    # ---- append timestamp to timestamps.csv ----
+    # ---- write timestamps.csv (append-only) ----
     ts_df = pd.DataFrame({"timestamp": [ts]})
     ts_df.to_csv(
         TIMESTAMPS_PATH,
@@ -160,7 +163,6 @@ def main():
             continue
 
         df["timestamp_IST"] = ts
-
         df = compute_max_pain(df)
 
         out_path = os.path.join(DATA_DIR, f"{underlying}.csv")
