@@ -99,6 +99,18 @@ def update_timestamp_master():
         f"✅ timestamps.csv updated | count={len(ts_df)} | latest={max(timestamps)}"
     )
 
+# 🔍 DEBUG BTC CSV
+df_debug = pd.read_csv(BTC_PATH)
+
+st.write("📄 BTC.csv columns:", list(df_debug.columns))
+st.write("📄 BTC.csv shape:", df_debug.shape)
+
+# show first 5 rows of the supposed timestamp column
+st.write(
+    "🕒 Raw timestamp column preview:",
+    df_debug.iloc[:, TIMESTAMP_COL_IDX].head(10)
+)
+
 # =================================================
 # UPDATE TIMESTAMPS ON EVERY RUN
 # =================================================
@@ -221,3 +233,4 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["△ MP 2"] = merged.iloc[:, 1] - merged.iloc[:, 2]
+
