@@ -31,7 +31,7 @@ def rotated_time_sort(times, pivot="17:30"):
     return sorted(times, key=key, reverse=True)
 
 def safe_ratio(a, b):
-    return a / b if b and not pd.isna(b) else None
+    return a / b if b and not pd.isna(b) and b != 0 else None
 
 # -------------------------------------------------
 # CONFIG
@@ -40,8 +40,8 @@ API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
+# column indices (kept as-is for rest of logic)
 STRIKE_COL_IDX = 6
-TIMESTAMP_COL_IDX = 14
 VALUE_COL_IDX = 19
 
 CALL_OI_COL_IDX = 1
@@ -74,20 +74,24 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# TIMESTAMP RELOAD BUTTON (MANUAL)
+# TIMESTAMP RELOAD (FROM BTC.csv → timestamp_IST)
 # -------------------------------------------------
 if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
-reload_ts = st.button("🔁 Reload timestamps from CSV")
+reload_ts = st.button("🔁 Reload timestamps from BTC.csv")
 
 if reload_ts or not st.session_state.timestamps:
     try:
         df_ts = pd.read_csv("data/BTC.csv")
-        df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+
+        if "timestamp_IST" not in df_ts.columns:
+            st.error("❌ timestamp_IST column not found in BTC.csv")
+            st.stop()
 
         st.session_state.timestamps = rotated_time_sort(
-            df_ts["timestamp"]
+            df_ts["timestamp_IST"]
+            .astype(str)
             .dropna()
             .unique()
             .tolist()
@@ -134,6 +138,10 @@ for UNDERLYING in ASSETS:
 
     df_raw = pd.read_csv(f"data/{UNDERLYING}.csv")
 
+    if "timestamp_IST" not in df_raw.columns:
+        st.error(f"❌ timestamp_IST missing in {UNDERLYING}.csv")
+        continue
+
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
         "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
@@ -147,7 +155,7 @@ for UNDERLYING in ASSETS:
         "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
         "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
         "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
-        "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
+        "timestamp": df_raw["timestamp_IST"].astype(str),
     }).dropna(subset=["strike_price", "timestamp"])
 
     # PCR historical
@@ -197,11 +205,11 @@ for UNDERLYING in ASSETS:
     # -------------------------------------------------
     # HISTORICAL MAX PAIN
     # -------------------------------------------------
-    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t1})
-    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-    merged["Change"] = merged[t1] - merged[t2]
+    merged["△ MP 2"] = merged.iloc[:, 1] - merged.iloc[:, 2]
 
     # -------------------------------------------------
     # LIVE MAX PAIN
@@ -244,32 +252,24 @@ for UNDERLYING in ASSETS:
 
     live_mp = compute_max_pain(live_mp)
 
-    # -------------------------------------------------
-    # FINAL MERGE
-    # -------------------------------------------------
     final = merged.merge(live_mp, on="strike_price", how="left")
 
-    final["Current − Time1"] = final["Current"] - final[t1]
-    final["ΔΔ MP 1"] = -1 * (final["Current − Time1"].shift(-1) - final["Current − Time1"])
+    final["△ MP 1"] = final["Current"] - final.iloc[:, 1]
+    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
+    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
     now_ts = get_ist_time()
 
     final = final.rename(columns={
         "Current": f"MP ({now_ts})",
-        t1: f"MP ({t1})",
-        t2: f"MP ({t2})",
-        "Current − Time1": "△ MP 1",
-        "Change": "△ MP 2",
+        "△ MP 1": "△ MP 1",
+        "△ MP 2": "△ MP 2",
     })
-
-    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
     final = final[
         [
             "strike_price",
             f"MP ({now_ts})",
-            f"MP ({t1})",
-            f"MP ({t2})",
             "△ MP 1",
             "△ MP 2",
             "ΔΔ MP 1",
@@ -277,28 +277,8 @@ for UNDERLYING in ASSETS:
         ]
     ].round(0).astype("Int64")
 
-    # -------------------------------------------------
-    # HIGHLIGHTING
-    # -------------------------------------------------
-    mp_cur = f"MP ({now_ts})"
-    atm_low = atm_high = None
-
-    if prices[UNDERLYING]:
-        strikes = final["strike_price"].astype(float).tolist()
-        atm_low = max([s for s in strikes if s <= prices[UNDERLYING]], default=None)
-        atm_high = min([s for s in strikes if s >= prices[UNDERLYING]], default=None)
-
-    min_mp = final[mp_cur].min()
-
-    def highlight(row):
-        if row["strike_price"] in (atm_low, atm_high):
-            return ["background-color:#4B0082"] * len(row)
-        if row[mp_cur] == min_mp:
-            return ["background-color:#8B0000;color:white"] * len(row)
-        return [""] * len(row)
-
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True, height=700)
+    st.dataframe(final, use_container_width=True, height=700)
 
 # -------------------------------------------------
 # PCR TABLES
