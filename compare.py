@@ -4,6 +4,7 @@ import os
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 # =================================================
@@ -14,7 +15,6 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 BTC_PATH = os.path.join(DATA_DIR, "BTC.csv")
 ETH_PATH = os.path.join(DATA_DIR, "ETH.csv")
-TS_PATH = os.path.join(DATA_DIR, "timestamps.csv")
 
 # =================================================
 # PAGE CONFIG
@@ -23,18 +23,18 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # =================================================
-# AUTO REFRESH (CACHE BUSTER)
+# AUTO REFRESH
 # =================================================
 refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 
 # =================================================
-# AUTO TIMESTAMP MODE
-# =================================================
-auto_update_ts = st.checkbox("🔄 Auto-update timestamps", value=True)
-
-# =================================================
 # HELPERS
 # =================================================
+def get_ist_time_HHMM():
+    utc_now = datetime.utcnow()
+    ist_now = utc_now + timedelta(hours=5, minutes=30)
+    return ist_now.strftime("%H:%M")
+
 def rotated_time_sort(times, pivot="17:30"):
     pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
     def key(t):
@@ -53,38 +53,33 @@ EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
 # =================================================
-# LOAD TIMESTAMPS (FORCED RELOAD EVERY REFRESH)
+# LIVE TIMESTAMP MANAGEMENT (STREAMLIT-SAFE)
 # =================================================
-if not os.path.exists(TS_PATH):
-    st.error("❌ timestamps.csv not found. Run collector.py first.")
-    st.stop()
+current_ts = get_ist_time_HHMM()
 
-# ---- FORCE pandas to reload file every time ----
-df_ts = pd.read_csv(TS_PATH)
+if "timestamps" not in st.session_state:
+    st.session_state.timestamps = []
 
-if "timestamp" not in df_ts.columns or df_ts.empty:
-    st.error("❌ timestamps.csv is empty or malformed.")
-    st.stop()
+# add new timestamp if changed
+if current_ts not in st.session_state.timestamps:
+    st.session_state.timestamps.insert(0, current_ts)
 
-timestamps = rotated_time_sort(
-    df_ts["timestamp"]
-    .astype(str)
-    .copy()          # <-- CRITICAL: breaks pandas/Streamlit reuse
-    .tolist()
-)
+# keep last 20 snapshots only
+timestamps = st.session_state.timestamps[:20]
 
-st.caption(f"🔁 Refresh #{refresh_count} | timestamps loaded: {len(timestamps)}")
+st.caption(f"⏱ Live timestamps tracked: {timestamps}")
 
 if len(timestamps) < 2:
-    st.warning("⏳ Waiting for at least 2 timestamps...")
+    st.warning("Waiting for at least 2 snapshots…")
     st.stop()
 
 # =================================================
 # TIMESTAMP SELECTION
 # =================================================
+auto_update_ts = st.checkbox("🔄 Auto-update timestamps", value=True)
+
 if auto_update_ts:
-    t1 = timestamps[0]
-    t2 = timestamps[1]
+    t1, t2 = timestamps[0], timestamps[1]
     st.info(f"🕒 Auto mode: {t1} vs {t2}")
 else:
     t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
@@ -118,13 +113,13 @@ pcr_rows = []
 for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
 
     if not os.path.exists(PATH):
-        st.warning(f"⚠️ {UNDERLYING}.csv not found")
+        st.warning(f"{UNDERLYING}.csv not found")
         continue
 
     df = pd.read_csv(PATH)
 
     if "timestamp_IST" not in df.columns:
-        st.error(f"❌ timestamp_IST missing in {UNDERLYING}.csv")
+        st.error(f"timestamp_IST missing in {UNDERLYING}.csv")
         continue
 
     # -------------------------------------------------
@@ -134,7 +129,6 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         df[df["timestamp_IST"] == t1]["put_oi"].sum(),
         df[df["timestamp_IST"] == t1]["call_oi"].sum(),
     )
-
     pcr_t2_oi = safe_ratio(
         df[df["timestamp_IST"] == t2]["put_oi"].sum(),
         df[df["timestamp_IST"] == t2]["call_oi"].sum(),
@@ -144,7 +138,6 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         df[df["timestamp_IST"] == t1]["put_volume"].sum(),
         df[df["timestamp_IST"] == t1]["call_volume"].sum(),
     )
-
     pcr_t2_vol = safe_ratio(
         df[df["timestamp_IST"] == t2]["put_volume"].sum(),
         df[df["timestamp_IST"] == t2]["call_volume"].sum(),
@@ -170,7 +163,6 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
         df_live[df_live["contract_type"] == "put_options"]["oi_contracts"].sum(),
         df_live[df_live["contract_type"] == "call_options"]["oi_contracts"].sum(),
     )
-
     pcr_live_vol = safe_ratio(
         df_live[df_live["contract_type"] == "put_options"]["volume"].sum(),
         df_live[df_live["contract_type"] == "call_options"]["volume"].sum(),
@@ -189,17 +181,8 @@ for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
     # -------------------------------------------------
     # MAX PAIN COMPARISON
     # -------------------------------------------------
-    df_t1 = (
-        df[df["timestamp_IST"] == t1]
-        .groupby("strike_price", as_index=False)["max_pain"]
-        .sum()
-    )
-
-    df_t2 = (
-        df[df["timestamp_IST"] == t2]
-        .groupby("strike_price", as_index=False)["max_pain"]
-        .sum()
-    )
+    df_t1 = df[df["timestamp_IST"] == t1].groupby("strike_price", as_index=False)["max_pain"].sum()
+    df_t2 = df[df["timestamp_IST"] == t2].groupby("strike_price", as_index=False)["max_pain"].sum()
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["△ MP"] = merged.iloc[:, 1] - merged.iloc[:, 2]
@@ -229,4 +212,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟢 Source of truth: collector.py → timestamps.csv")
+st.caption("🟢 Live timestamps managed inside Streamlit (Cloud-safe)")
