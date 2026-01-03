@@ -6,20 +6,20 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# -------------------------------------------------
+# =================================================
 # PAGE CONFIG
-# -------------------------------------------------
+# =================================================
 st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
-# -------------------------------------------------
-# AUTO REFRESH (60s)
-# -------------------------------------------------
-st_autorefresh(interval=60_000, key="auto_refresh")
+# =================================================
+# AUTO REFRESH (60s) — drives re-fetch
+# =================================================
+refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 
-# -------------------------------------------------
+# =================================================
 # HELPERS
-# -------------------------------------------------
+# =================================================
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
@@ -33,14 +33,14 @@ def rotated_time_sort(times, pivot="17:30"):
 def safe_ratio(a, b):
     return a / b if b and not pd.isna(b) and b != 0 else None
 
-# -------------------------------------------------
+# =================================================
 # CONFIG
-# -------------------------------------------------
+# =================================================
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
 
-# column indices (kept as-is for rest of logic)
+# CSV column indices (unchanged from your logic)
 STRIKE_COL_IDX = 6
 VALUE_COL_IDX = 19
 
@@ -56,9 +56,57 @@ PUT_GAMMA_COL_IDX = 7
 PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
 
-# -------------------------------------------------
+# =================================================
+# TIMESTAMPS — FETCH FROM GITHUB ON EVERY REFRESH
+# =================================================
+GITHUB_TS_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "main/data/timestamps.csv"
+)
+
+@st.cache_data(ttl=0)  # NO caching — always refetch
+def fetch_timestamps_from_github(_refresh_counter):
+    df = pd.read_csv(GITHUB_TS_URL)
+
+    if "time" not in df.columns:
+        return []
+
+    return (
+        df["time"]
+        .astype(str)
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+timestamps = fetch_timestamps_from_github(refresh_count)
+timestamps = rotated_time_sort(timestamps)
+
+st.caption(f"🔁 Refresh #{refresh_count} | timestamps loaded: {len(timestamps)}")
+
+if len(timestamps) < 2:
+    st.warning("Not enough timestamps available")
+    st.stop()
+
+# =================================================
+# TIMESTAMP SELECTION
+# =================================================
+t1 = st.selectbox(
+    "Time 1 (Latest)",
+    timestamps,
+    index=0,
+)
+
+t2 = st.selectbox(
+    "Time 2 (Previous)",
+    timestamps,
+    index=1,
+)
+
+# =================================================
 # LIVE PRICE
-# -------------------------------------------------
+# =================================================
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
     try:
@@ -73,62 +121,9 @@ c1, c2 = st.columns(2)
 c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
-# -------------------------------------------------
-# TIMESTAMP RELOAD (FROM BTC.csv → timestamp_IST)
-# -------------------------------------------------
-if "timestamps" not in st.session_state:
-    st.session_state.timestamps = []
-
-reload_ts = st.button("🔁 Reload timestamps from BTC.csv")
-
-if reload_ts or not st.session_state.timestamps:
-    try:
-        df_ts = pd.read_csv("data/BTC.csv")
-
-        if "timestamp_IST" not in df_ts.columns:
-            st.error("❌ timestamp_IST column not found in BTC.csv")
-            st.stop()
-
-        st.session_state.timestamps = rotated_time_sort(
-            df_ts["timestamp_IST"]
-            .astype(str)
-            .dropna()
-            .unique()
-            .tolist()
-        )
-
-        st.success(f"Loaded {len(st.session_state.timestamps)} timestamps")
-
-    except Exception as e:
-        st.error(f"Failed to reload timestamps: {e}")
-        st.stop()
-
-timestamps = st.session_state.timestamps
-
-if len(timestamps) < 2:
-    st.warning("Not enough timestamps available")
-    st.stop()
-
-# -------------------------------------------------
-# TIMESTAMP SELECTION
-# -------------------------------------------------
-t1 = st.selectbox(
-    "Time 1 (Latest)",
-    timestamps,
-    index=0,
-    key="t1_select"
-)
-
-t2 = st.selectbox(
-    "Time 2 (Previous)",
-    timestamps,
-    index=1,
-    key="t2_select"
-)
-
-# -------------------------------------------------
+# =================================================
 # PCR COLLECTION
-# -------------------------------------------------
+# =================================================
 pcr_rows = []
 
 # =================================================
@@ -211,78 +206,12 @@ for UNDERLYING in ASSETS:
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["△ MP 2"] = merged.iloc[:, 1] - merged.iloc[:, 2]
 
-    # -------------------------------------------------
-    # LIVE MAX PAIN
-    # -------------------------------------------------
-    df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
-    for c in ["strike_price", "mark_price", "oi_contracts"]:
-        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
-
-    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
-    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
-
-    live_mp = pd.merge(
-        calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-        puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
-        on="strike_price",
-        how="outer",
-    ).sort_values("strike_price")
-
-    def compute_max_pain(df):
-        A = df["call_mark"].fillna(0).values
-        B = df["call_oi"].fillna(0).values
-        G = df["strike_price"].values
-        L = df["put_oi"].fillna(0).values
-        M = df["put_mark"].fillna(0).values
-
-        df["Current"] = [
-            round(
-                (
-                    -sum(A[i:] * B[i:])
-                    + G[i] * sum(B[:i])
-                    - sum(G[:i] * B[:i])
-                    - sum(M[:i] * L[:i])
-                    + sum(G[i:] * L[i:])
-                    - G[i] * sum(L[i:])
-                ) / 10000
-            )
-            for i in range(len(df))
-        ]
-        return df[["strike_price", "Current"]]
-
-    live_mp = compute_max_pain(live_mp)
-
-    final = merged.merge(live_mp, on="strike_price", how="left")
-
-    final["△ MP 1"] = final["Current"] - final.iloc[:, 1]
-    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
-    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
-
-    now_ts = get_ist_time()
-
-    final = final.rename(columns={
-        "Current": f"MP ({now_ts})",
-        "△ MP 1": "△ MP 1",
-        "△ MP 2": "△ MP 2",
-    })
-
-    final = final[
-        [
-            "strike_price",
-            f"MP ({now_ts})",
-            "△ MP 1",
-            "△ MP 2",
-            "ΔΔ MP 1",
-            "ΔΔ MP 2",
-        ]
-    ].round(0).astype("Int64")
-
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(final, use_container_width=True, height=700)
+    st.dataframe(merged.round(0), use_container_width=True)
 
-# -------------------------------------------------
+# =================================================
 # PCR TABLES
-# -------------------------------------------------
+# =================================================
 pcr_df = pd.DataFrame(
     pcr_rows,
     columns=[
@@ -302,4 +231,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+st.caption("🟢 Timestamps fetched live from GitHub timestamps.csv")
