@@ -1,33 +1,42 @@
-# crypto compare
+# crypto_compare.py
 
+import os
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-# -------------------------------------------------
+# =================================================
+# PATH SETUP (CRITICAL – DO NOT SKIP)
+# =================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+BTC_PATH = os.path.join(DATA_DIR, "BTC.csv")
+ETH_PATH = os.path.join(DATA_DIR, "ETH.csv")
+TS_PATH = os.path.join(DATA_DIR, "timestamps.csv")
+
+# =================================================
 # PAGE CONFIG
-# -------------------------------------------------
+# =================================================
 st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
-# -------------------------------------------------
-# AUTO REFRESH (60s)
-# -------------------------------------------------
+# =================================================
+# AUTO REFRESH
+# =================================================
 st_autorefresh(interval=60_000, key="auto_refresh")
 
-# -------------------------------------------------
-# AUTO TIMESTAMP MODE
-# -------------------------------------------------
-auto_update_ts = st.checkbox(
-    "🔄 Auto-update timestamps on refresh",
-    value=True
-)
+# =================================================
+# AUTO MODE TOGGLE
+# =================================================
+auto_update_ts = st.checkbox("🔄 Auto-update timestamps", value=True)
 
-# -------------------------------------------------
+# =================================================
 # HELPERS
-# -------------------------------------------------
+# =================================================
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
@@ -39,11 +48,11 @@ def rotated_time_sort(times, pivot="17:30"):
     return sorted(times, key=key, reverse=True)
 
 def safe_ratio(a, b):
-    return a / b if b and not pd.isna(b) else None
+    return a / b if b and not pd.isna(b) and b != 0 else None
 
-# -------------------------------------------------
+# =================================================
 # CONFIG
-# -------------------------------------------------
+# =================================================
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "03-01-2026"
 ASSETS = ["BTC", "ETH"]
@@ -64,44 +73,63 @@ PUT_GAMMA_COL_IDX = 7
 PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
 
-# -------------------------------------------------
-# TIMESTAMP MASTER UPDATE (KEY FIX)
-# -------------------------------------------------
+# =================================================
+# TIMESTAMP MASTER UPDATER (THIS IS THE KEY)
+# =================================================
 def update_timestamp_master():
-    df = pd.read_csv("data/BTC.csv")
-    ts = (
+    if not os.path.exists(BTC_PATH):
+        st.error(f"BTC.csv not found at {BTC_PATH}")
+        return
+
+    df = pd.read_csv(BTC_PATH)
+
+    timestamps = (
         df.iloc[:, TIMESTAMP_COL_IDX]
         .astype(str)
         .str[:5]
         .dropna()
         .unique()
     )
-    pd.DataFrame({"timestamp": ts}).to_csv(
-        "data/timestamps.csv", index=False
+
+    ts_df = pd.DataFrame({"timestamp": timestamps})
+    ts_df.to_csv(TS_PATH, index=False)
+
+    # PROOF ON SCREEN
+    st.caption(
+        f"✅ timestamps.csv updated | count={len(ts_df)} | latest={max(timestamps)}"
     )
 
+# =================================================
+# UPDATE TIMESTAMPS ON EVERY RUN
+# =================================================
 update_timestamp_master()
 
-# -------------------------------------------------
+# =================================================
 # LOAD TIMESTAMPS (SINGLE SOURCE OF TRUTH)
-# -------------------------------------------------
-df_ts = pd.read_csv("data/timestamps.csv")
+# =================================================
+if not os.path.exists(TS_PATH):
+    st.stop()
+
+df_ts = pd.read_csv(TS_PATH)
 timestamps = rotated_time_sort(df_ts["timestamp"].tolist())
 
-# -------------------------------------------------
-# TIMESTAMP SELECTION (STABLE)
-# -------------------------------------------------
+if len(timestamps) < 2:
+    st.stop()
+
+# =================================================
+# TIMESTAMP SELECTION (STABLE BY DESIGN)
+# =================================================
 if auto_update_ts:
     t1 = timestamps[0]
-    t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
-    st.caption(f"🕒 Auto mode: {t1} vs {t2}")
+    t2 = timestamps[1]
+    st.info(f"🕒 Auto mode: {t1} vs {t2}")
 else:
     t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
     t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
 
-# -------------------------------------------------
+# =================================================
 # LIVE PRICE
-# -------------------------------------------------
+# =================================================
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
     try:
@@ -116,17 +144,17 @@ c1, c2 = st.columns(2)
 c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
-# -------------------------------------------------
+# =================================================
 # PCR COLLECTION
-# -------------------------------------------------
+# =================================================
 pcr_rows = []
 
 # =================================================
 # MAIN LOOP
 # =================================================
-for UNDERLYING in ASSETS:
+for UNDERLYING, PATH in zip(ASSETS, [BTC_PATH, ETH_PATH]):
 
-    df_raw = pd.read_csv(f"data/{UNDERLYING}.csv")
+    df_raw = pd.read_csv(PATH)
 
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
@@ -154,9 +182,7 @@ for UNDERLYING in ASSETS:
     pcr_t2_vol = safe_ratio(df[df["timestamp"] == t2]["put_vol"].sum(),
                             df[df["timestamp"] == t2]["call_vol"].sum())
 
-    # -------------------------------------------------
-    # LIVE CHAIN
-    # -------------------------------------------------
+    # Live chain
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -189,38 +215,9 @@ for UNDERLYING in ASSETS:
         pcr_t2_vol,
     ])
 
-    # -------------------------------------------------
-    # MAX PAIN (FULL LOGIC RESTORED)
-    # -------------------------------------------------
+    # MAX PAIN (historical)
     df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
     df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
     merged["△ MP 2"] = merged.iloc[:, 1] - merged.iloc[:, 2]
-
-    st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(merged.round(0), use_container_width=True)
-
-# -------------------------------------------------
-# PCR TABLES
-# -------------------------------------------------
-pcr_df = pd.DataFrame(
-    pcr_rows,
-    columns=[
-        "Asset",
-        "PCR OI (Current)",
-        "PCR OI (T1)",
-        "PCR OI (T2)",
-        "PCR Vol (Current)",
-        "PCR Vol (T1)",
-        "PCR Vol (T2)",
-    ],
-).set_index("Asset")
-
-st.subheader("📊 PCR Snapshot — OI")
-st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3))
-
-st.subheader("📊 PCR Snapshot — Volume")
-st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
-
-st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
