@@ -13,12 +13,12 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # -------------------------------------------------
-# AUTO REFRESH (60s)
+# AUTO REFRESH
 # -------------------------------------------------
 refresh_count = st_autorefresh(interval=60_000, key="auto_refresh")
 
 # -------------------------------------------------
-# AUTO TIMESTAMP UPDATE TOGGLE
+# AUTO TIMESTAMP TOGGLE
 # -------------------------------------------------
 auto_update_ts = st.checkbox(
     "🔄 Auto-update timestamps on every refresh",
@@ -82,26 +82,23 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# COMMON TIMESTAMP SELECTION  ✅ CORRECT ORDER
+# TIMESTAMP SELECTION (CORRECT ORDER)
 # -------------------------------------------------
 df_ts = pd.read_csv("data/BTC.csv")
 df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
 timestamps = rotated_time_sort(df_ts["timestamp"].unique())
 
-# init session state
 if "t1" not in st.session_state:
     st.session_state.t1 = timestamps[0]
 if "t2" not in st.session_state:
-    st.session_state.t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
+    st.session_state.t2 = timestamps[1]
 
-# force update on every refresh
+# 🔑 force update BEFORE widget creation
 if auto_update_ts:
     st.session_state.t1 = timestamps[0]
-    st.session_state.t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
+    st.session_state.t2 = timestamps[1]
 
-# -------------------------------------------------
-# SELECTBOXES — FORCED REMOUNT (THIS IS THE FIX)
-# -------------------------------------------------
+# 🔑 remount widgets
 t1 = st.selectbox(
     "Time 1 (Latest)",
     timestamps,
@@ -119,7 +116,7 @@ t2 = st.selectbox(
 st.session_state.t1 = t1
 st.session_state.t2 = t2
 
-st.caption("🕒 Auto mode ON" if auto_update_ts else "🔒 Auto mode OFF")
+st.caption("🕒 Auto timestamps ON" if auto_update_ts else "🔒 Auto timestamps OFF")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -140,30 +137,26 @@ for UNDERLYING in ASSETS:
         "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
         "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
         "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
+        "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
+        "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
+        "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
+        "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
+        "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
+        "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
     # PCR historical
-    pcr_t1_oi = safe_ratio(
-        df[df["timestamp"] == t1]["put_oi"].sum(),
-        df[df["timestamp"] == t1]["call_oi"].sum(),
-    )
-    pcr_t2_oi = safe_ratio(
-        df[df["timestamp"] == t2]["put_oi"].sum(),
-        df[df["timestamp"] == t2]["call_oi"].sum(),
-    )
-    pcr_t1_vol = safe_ratio(
-        df[df["timestamp"] == t1]["put_vol"].sum(),
-        df[df["timestamp"] == t1]["call_vol"].sum(),
-    )
-    pcr_t2_vol = safe_ratio(
-        df[df["timestamp"] == t2]["put_vol"].sum(),
-        df[df["timestamp"] == t2]["call_vol"].sum(),
-    )
+    pcr_t1_oi = safe_ratio(df[df["timestamp"] == t1]["put_oi"].sum(),
+                           df[df["timestamp"] == t1]["call_oi"].sum())
+    pcr_t2_oi = safe_ratio(df[df["timestamp"] == t2]["put_oi"].sum(),
+                           df[df["timestamp"] == t2]["call_oi"].sum())
+    pcr_t1_vol = safe_ratio(df[df["timestamp"] == t1]["put_vol"].sum(),
+                            df[df["timestamp"] == t1]["call_vol"].sum())
+    pcr_t2_vol = safe_ratio(df[df["timestamp"] == t2]["put_vol"].sum(),
+                            df[df["timestamp"] == t2]["call_vol"].sum())
 
-    # -------------------------------------------------
     # LIVE CHAIN
-    # -------------------------------------------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -178,12 +171,12 @@ for UNDERLYING in ASSETS:
 
     pcr_live_oi = safe_ratio(
         df_live[df_live["contract_type"] == "put_options"]["oi_contracts"].sum(),
-        df_live[df_live["contract_type"] == "call_options"]["oi_contracts"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["oi_contracts"].sum()
     )
 
     pcr_live_vol = safe_ratio(
         df_live[df_live["contract_type"] == "put_options"]["volume"].sum(),
-        df_live[df_live["contract_type"] == "call_options"]["volume"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["volume"].sum()
     )
 
     pcr_rows.append([
@@ -196,14 +189,12 @@ for UNDERLYING in ASSETS:
         pcr_t2_vol,
     ])
 
-    # -------------------------------------------------
-    # MAX PAIN
-    # -------------------------------------------------
+    # ================= MAX PAIN =================
     df_t1 = df[df["timestamp"] == t1].groupby("strike_price", as_index=False)["value"].sum()
     df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum()
 
-    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer", suffixes=(f" ({t1})", f" ({t2})"))
-    merged["△ MP 2"] = merged.iloc[:,1] - merged.iloc[:,2]
+    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
+    merged["△ MP 2"] = merged.iloc[:, 1] - merged.iloc[:, 2]
 
     st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
     st.dataframe(merged.round(0), use_container_width=True)
@@ -230,4 +221,4 @@ st.dataframe(pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
 st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
-st.caption("△ = Strike diff | Auto-refresh every 60s")
+st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
