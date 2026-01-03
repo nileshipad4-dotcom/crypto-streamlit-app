@@ -194,10 +194,9 @@ df = compute_max_pain(df)
 
 df = df.sort_values("strike_price").reset_index(drop=True)
 df["Δ max_pain"] = df["max_pain"].diff()
-df["Δ² max_pain"] = df["Δ max_pain"].diff()
 
 df_final = (
-    df[["strike_price", "max_pain", "Δ max_pain", "Δ² max_pain"]]
+    df[["strike_price", "max_pain", "Δ max_pain"]]
     .round(0)
     .astype("Int64")
 )
@@ -227,4 +226,3 @@ styled_df = df_final.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df, use_container_width=True)
 
 st.caption("Expiry logic: intraday-aware • no expired dates • immediate Friday ensured • Delta Exchange")
-
