@@ -1,4 +1,3 @@
-
 # crypto compare
 
 import streamlit as st
@@ -31,6 +30,9 @@ def rotated_time_sort(times, pivot="17:30"):
         return ((h * 60 + m) - pivot_minutes) % (24 * 60)
     return sorted(times, key=key, reverse=True)
 
+def safe_ratio(a, b):
+    return a / b if b and not pd.isna(b) else None
+
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
@@ -54,8 +56,6 @@ PUT_GAMMA_COL_IDX = 7
 PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
 
-FACTOR = 100_000_000
-
 # -------------------------------------------------
 # LIVE PRICE
 # -------------------------------------------------
@@ -64,7 +64,7 @@ def get_delta_price(symbol):
     try:
         r = requests.get(API_BASE, timeout=10).json()["result"]
         return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
-    except Exception:
+    except:
         return None
 
 prices = {a: get_delta_price(a) for a in ASSETS}
@@ -74,14 +74,53 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# COMMON TIMESTAMP SELECTION
+# TIMESTAMP RELOAD BUTTON (MANUAL)
 # -------------------------------------------------
-df_ts = pd.read_csv("data/BTC.csv")
-df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
-timestamps = rotated_time_sort(df_ts["timestamp"].unique())
+if "timestamps" not in st.session_state:
+    st.session_state.timestamps = []
 
-t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
-t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+reload_ts = st.button("🔁 Reload timestamps from CSV")
+
+if reload_ts or not st.session_state.timestamps:
+    try:
+        df_ts = pd.read_csv("data/BTC.csv")
+        df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+
+        st.session_state.timestamps = rotated_time_sort(
+            df_ts["timestamp"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        st.success(f"Loaded {len(st.session_state.timestamps)} timestamps")
+
+    except Exception as e:
+        st.error(f"Failed to reload timestamps: {e}")
+        st.stop()
+
+timestamps = st.session_state.timestamps
+
+if len(timestamps) < 2:
+    st.warning("Not enough timestamps available")
+    st.stop()
+
+# -------------------------------------------------
+# TIMESTAMP SELECTION
+# -------------------------------------------------
+t1 = st.selectbox(
+    "Time 1 (Latest)",
+    timestamps,
+    index=0,
+    key="t1_select"
+)
+
+t2 = st.selectbox(
+    "Time 2 (Previous)",
+    timestamps,
+    index=1,
+    key="t2_select"
+)
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -111,13 +150,12 @@ for UNDERLYING in ASSETS:
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    def safe_ratio(a, b):
-        return a / b if b and not pd.isna(b) else None
-
+    # PCR historical
     pcr_t1_oi = safe_ratio(
         df[df["timestamp"] == t1]["put_oi"].sum(),
         df[df["timestamp"] == t1]["call_oi"].sum(),
     )
+
     pcr_t2_oi = safe_ratio(
         df[df["timestamp"] == t2]["put_oi"].sum(),
         df[df["timestamp"] == t2]["call_oi"].sum(),
@@ -137,13 +175,13 @@ for UNDERLYING in ASSETS:
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
 
     pcr_live_oi = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "oi_contracts"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "oi_contracts"].sum(),
+        df_live[df_live["contract_type"] == "put_options"]["oi_contracts"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["oi_contracts"].sum(),
     )
 
     pcr_live_vol = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "volume"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum(),
+        df_live[df_live["contract_type"] == "put_options"]["volume"].sum(),
+        df_live[df_live["contract_type"] == "call_options"]["volume"].sum(),
     )
 
     pcr_rows.append([
@@ -152,8 +190,8 @@ for UNDERLYING in ASSETS:
         pcr_t1_oi,
         pcr_t2_oi,
         pcr_live_vol,
-        pcr_t1_vol if "pcr_t1_vol" in locals() else None,
-        pcr_t2_vol if "pcr_t2_vol" in locals() else None,
+        None,
+        None,
     ])
 
     # -------------------------------------------------
@@ -214,9 +252,6 @@ for UNDERLYING in ASSETS:
     final["Current − Time1"] = final["Current"] - final[t1]
     final["ΔΔ MP 1"] = -1 * (final["Current − Time1"].shift(-1) - final["Current − Time1"])
 
-    # -------------------------------------------------
-    # RENAME
-    # -------------------------------------------------
     now_ts = get_ist_time()
 
     final = final.rename(columns={
@@ -227,22 +262,20 @@ for UNDERLYING in ASSETS:
         "Change": "△ MP 2",
     })
 
-    # ✅ ΔΔ MP 2 — CORRECT PLACE
     final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
     final = final[
         [
             "strike_price",
-            f"MP ({now_ts})",   # mp1
-            f"MP ({t1})",       # mp2
-            f"MP ({t2})",       # mp3
-            "△ MP 1",           # delta mp1
-            "△ MP 2",           # delta mp2
-            "ΔΔ MP 1",          # delta delta mp1
-            "ΔΔ MP 2",          # delta delta mp2
-       ]
+            f"MP ({now_ts})",
+            f"MP ({t1})",
+            f"MP ({t2})",
+            "△ MP 1",
+            "△ MP 2",
+            "ΔΔ MP 1",
+            "ΔΔ MP 2",
+        ]
     ].round(0).astype("Int64")
-
 
     # -------------------------------------------------
     # HIGHLIGHTING
@@ -290,4 +323,3 @@ st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
-
