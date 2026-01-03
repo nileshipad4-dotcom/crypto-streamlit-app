@@ -18,6 +18,14 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 st_autorefresh(interval=60_000, key="auto_refresh")
 
 # -------------------------------------------------
+# AUTO TIMESTAMP UPDATE TOGGLE
+# -------------------------------------------------
+auto_update_ts = st.checkbox(
+    "🔄 Auto-update timestamps on every refresh",
+    value=True
+)
+
+# -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
 def get_ist_time():
@@ -29,6 +37,9 @@ def rotated_time_sort(times, pivot="17:30"):
         h, m = map(int, t.split(":"))
         return ((h * 60 + m) - pivot_minutes) % (24 * 60)
     return sorted(times, key=key, reverse=True)
+
+def safe_ratio(a, b):
+    return a / b if b and not pd.isna(b) else None
 
 # -------------------------------------------------
 # CONFIG
@@ -52,8 +63,6 @@ CALL_VEGA_COL_IDX = 5
 PUT_GAMMA_COL_IDX = 7
 PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
-
-FACTOR = 100_000_000
 
 # -------------------------------------------------
 # LIVE PRICE
@@ -79,8 +88,36 @@ df_ts = pd.read_csv("data/BTC.csv")
 df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
 timestamps = rotated_time_sort(df_ts["timestamp"].unique())
 
-t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
-t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+# session state init
+if "t1" not in st.session_state:
+    st.session_state.t1 = None
+if "t2" not in st.session_state:
+    st.session_state.t2 = None
+
+# auto-update logic
+if auto_update_ts or st.session_state.t1 not in timestamps:
+    st.session_state.t1 = timestamps[0]
+    st.session_state.t2 = timestamps[1] if len(timestamps) > 1 else timestamps[0]
+
+t1 = st.selectbox(
+    "Time 1 (Latest)",
+    timestamps,
+    index=timestamps.index(st.session_state.t1),
+)
+
+t2 = st.selectbox(
+    "Time 2 (Previous)",
+    timestamps,
+    index=timestamps.index(st.session_state.t2),
+)
+
+st.session_state.t1 = t1
+st.session_state.t2 = t2
+
+if auto_update_ts:
+    st.caption("🕒 Timestamps auto-synced to latest on refresh")
+else:
+    st.caption("🔒 Timestamps locked")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -110,9 +147,7 @@ for UNDERLYING in ASSETS:
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna(subset=["strike_price", "timestamp"])
 
-    def safe_ratio(a, b):
-        return a / b if b and not pd.isna(b) else None
-
+    # PCR (historical)
     pcr_t1_oi = safe_ratio(
         df[df["timestamp"] == t1]["put_oi"].sum(),
         df[df["timestamp"] == t1]["call_oi"].sum(),
@@ -120,6 +155,15 @@ for UNDERLYING in ASSETS:
     pcr_t2_oi = safe_ratio(
         df[df["timestamp"] == t2]["put_oi"].sum(),
         df[df["timestamp"] == t2]["call_oi"].sum(),
+    )
+
+    pcr_t1_vol = safe_ratio(
+        df[df["timestamp"] == t1]["put_vol"].sum(),
+        df[df["timestamp"] == t1]["call_vol"].sum(),
+    )
+    pcr_t2_vol = safe_ratio(
+        df[df["timestamp"] == t2]["put_vol"].sum(),
+        df[df["timestamp"] == t2]["call_vol"].sum(),
     )
 
     # ---------------- LIVE CHAIN ----------------
@@ -151,8 +195,8 @@ for UNDERLYING in ASSETS:
         pcr_t1_oi,
         pcr_t2_oi,
         pcr_live_vol,
-        pcr_t1_vol if "pcr_t1_vol" in locals() else None,
-        pcr_t2_vol if "pcr_t2_vol" in locals() else None,
+        pcr_t1_vol,
+        pcr_t2_vol,
     ])
 
     # -------------------------------------------------
@@ -162,7 +206,7 @@ for UNDERLYING in ASSETS:
     df_t2 = df[df["timestamp"] == t2].groupby("strike_price", as_index=False)["value"].sum().rename(columns={"value": t2})
 
     merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-    merged["Change"] = merged[t1] - merged[t2]
+    merged["△ MP 2"] = merged[t1] - merged[t2]
 
     # -------------------------------------------------
     # LIVE MAX PAIN
@@ -210,38 +254,30 @@ for UNDERLYING in ASSETS:
     # -------------------------------------------------
     final = merged.merge(live_mp, on="strike_price", how="left")
 
-    final["Current − Time1"] = final["Current"] - final[t1]
-    final["ΔΔ MP 1"] = -1 * (final["Current − Time1"].shift(-1) - final["Current − Time1"])
+    final["△ MP 1"] = final["Current"] - final[t1]
+    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
+    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
-    # -------------------------------------------------
-    # RENAME
-    # -------------------------------------------------
     now_ts = get_ist_time()
 
     final = final.rename(columns={
         "Current": f"MP ({now_ts})",
         t1: f"MP ({t1})",
         t2: f"MP ({t2})",
-        "Current − Time1": "△ MP 1",
-        "Change": "△ MP 2",
     })
-
-    # ✅ ΔΔ MP 2 — CORRECT PLACE
-    final["ΔΔ MP 2"] = -1 * (final["△ MP 2"].shift(-1) - final["△ MP 2"])
 
     final = final[
         [
             "strike_price",
-            f"MP ({now_ts})",   # mp1
-            f"MP ({t1})",       # mp2
-            f"MP ({t2})",       # mp3
-            "△ MP 1",           # delta mp1
-            "△ MP 2",           # delta mp2
-            "ΔΔ MP 1",          # delta delta mp1
-            "ΔΔ MP 2",          # delta delta mp2
-       ]
+            f"MP ({now_ts})",
+            f"MP ({t1})",
+            f"MP ({t2})",
+            "△ MP 1",
+            "△ MP 2",
+            "ΔΔ MP 1",
+            "ΔΔ MP 2",
+        ]
     ].round(0).astype("Int64")
-
 
     # -------------------------------------------------
     # HIGHLIGHTING
@@ -289,4 +325,3 @@ st.subheader("📊 PCR Snapshot — Volume")
 st.dataframe(pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3))
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
-
