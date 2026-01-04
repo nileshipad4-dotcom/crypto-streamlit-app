@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import StringIO
 import time
 
@@ -9,7 +9,7 @@ import time
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("⏱ Crypto Timestamp Viewer")
+st.title("⏱ ETH Timestamp Selector")
 
 # -------------------------------------------------
 # CONSTANTS
@@ -20,13 +20,12 @@ CSV_URL = (
     "refs/heads/main/data/ETH.csv"
 )
 
+REFRESH_INTERVAL_MS = 10_000  # 10 seconds
+
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
-def get_ist_datetime():
-    return datetime.utcnow() + timedelta(hours=5, minutes=30)
-
-def fetch_csv_strong_no_cache(url: str) -> pd.DataFrame:
+def fetch_csv_no_cache(url: str) -> pd.DataFrame:
     cache_buster = int(time.time() * 1000)
     url = f"{url}?cb={cache_buster}"
 
@@ -42,8 +41,8 @@ def fetch_csv_strong_no_cache(url: str) -> pd.DataFrame:
     r.raise_for_status()
     return pd.read_csv(StringIO(r.text))
 
-def extract_all_timestamps(df, col_idx=14):
-    ts = (
+def extract_timestamps(df, col_idx=14):
+    return sorted(
         df.iloc[:, col_idx]
         .astype(str)
         .str[:5]
@@ -51,84 +50,69 @@ def extract_all_timestamps(df, col_idx=14):
         .unique()
         .tolist()
     )
-    return sorted(ts)
 
 # -------------------------------------------------
 # SESSION STATE INIT
 # -------------------------------------------------
-if "df" not in st.session_state:
-    st.session_state.df = None
-
 if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
-if "last_fetch" not in st.session_state:
-    st.session_state.last_fetch = None
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = None
 
 # -------------------------------------------------
-# UI — REFRESH BUTTON
+# AUTO REFRESH (EVERY 10s)
 # -------------------------------------------------
-st.subheader("📡 Data Source: ETH.csv (GitHub Raw)")
-
-refresh_btn = st.button("⏱ Time Refresh")
+st.autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
 
 # -------------------------------------------------
-# FETCH ON BUTTON CLICK
+# MANUAL REFRESH BUTTON
 # -------------------------------------------------
-if refresh_btn:
-    try:
-        df = fetch_csv_strong_no_cache(CSV_URL)
-        st.session_state.df = df
-        st.session_state.timestamps = extract_all_timestamps(df)
-        st.session_state.last_fetch = datetime.utcnow()
-        st.success("✅ Data refreshed successfully")
-
-    except Exception as e:
-        st.error(f"❌ Fetch failed: {e}")
+if st.button("⏱ Time Refresh"):
+    st.session_state.force_refresh = True
+else:
+    st.session_state.force_refresh = False
 
 # -------------------------------------------------
-# DISPLAY
+# FETCH DATA (AUTO OR MANUAL)
 # -------------------------------------------------
-if st.session_state.df is not None:
-    df = st.session_state.df
-    timestamps = st.session_state.timestamps
+try:
+    df = fetch_csv_no_cache(CSV_URL)
+    st.session_state.timestamps = extract_timestamps(df)
+    st.session_state.last_refresh = datetime.utcnow()
 
-    now_ist = get_ist_datetime()
-    st.write("🕒 Current IST:", now_ist.strftime("%Y-%m-%d %H:%M:%S"))
-    st.write("🕒 Last Refresh (UTC):", st.session_state.last_fetch)
-    st.write("📦 Rows:", len(df))
-    st.write("📦 Columns:", list(df.columns))
+except Exception as e:
+    st.error(f"❌ Data fetch failed: {e}")
 
-    st.divider()
+# -------------------------------------------------
+# UI — TIMESTAMP DROPDOWNS
+# -------------------------------------------------
+timestamps = st.session_state.timestamps
 
-    # -------------------------------------------------
-    # TIMESTAMP DROPDOWNS (TWO)
-    # -------------------------------------------------
-    st.subheader("⏰ Select Timestamps")
-
+if timestamps:
     col1, col2 = st.columns(2)
 
     with col1:
         t1 = st.selectbox(
-            "Time 1",
+            "Timestamp 1",
             timestamps,
-            index=0 if timestamps else None,
+            index=0,
+            key="t1",
         )
 
     with col2:
         t2 = st.selectbox(
-            "Time 2",
+            "Timestamp 2",
             timestamps,
-            index=len(timestamps) - 1 if timestamps else None,
+            index=len(timestamps) - 1,
+            key="t2",
         )
 
-    st.info(f"Selected Times → ⏱ {t1}  |  ⏱ {t2}")
-
-    # -------------------------------------------------
-    # PREVIEW
-    # -------------------------------------------------
-    st.subheader("📄 CSV Preview — LAST 50 ROWS")
-    st.dataframe(df.tail(50), use_container_width=True)
-
-else:
-    st.info("Click **⏱ Time Refresh** to load ETH data")
+# -------------------------------------------------
+# LAST REFRESH TIME (ONLY INFO SHOWN)
+# -------------------------------------------------
+if st.session_state.last_refresh:
+    st.caption(
+        f"Last refreshed (UTC): "
+        f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
