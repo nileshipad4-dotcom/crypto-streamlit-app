@@ -13,9 +13,17 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # -------------------------------------------------
-# AUTO REFRESH (60s)
+# FORCE FRESH RUN TOKEN (KEY FIX)
 # -------------------------------------------------
-st_autorefresh(interval=60_000, key="auto_refresh")
+if "run_id" not in st.session_state:
+    st.session_state.run_id = 0
+
+# -------------------------------------------------
+# AUTO REFRESH (60s) + CACHE CLEAR
+# -------------------------------------------------
+if st_autorefresh(interval=60_000, key="auto_refresh"):
+    st.cache_data.clear()
+    st.session_state.run_id += 1
 
 # -------------------------------------------------
 # HELPERS
@@ -56,20 +64,13 @@ PUT_GAMMA_COL_IDX = 7
 PUT_DELTA_COL_IDX = 8
 PUT_VEGA_COL_IDX = 9
 
-FACTOR = 100_000_000
-
 # -------------------------------------------------
 # LIVE PRICE
 # -------------------------------------------------
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
-    try:
-        r = requests.get(API_BASE, timeout=10).json()["result"]
-        return float(
-            next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"]
-        )
-    except Exception:
-        return None
+    r = requests.get(API_BASE, timeout=10).json()["result"]
+    return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
 
 prices = {a: get_delta_price(a) for a in ASSETS}
 
@@ -78,14 +79,29 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# COMMON TIMESTAMP SELECTION
+# FRESH TIMESTAMPS (NO STALE CACHE)
 # -------------------------------------------------
-df_ts = pd.read_csv("data/BTC.csv")
-df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
-timestamps = rotated_time_sort(df_ts["timestamp"].unique())
+@st.cache_data(ttl=0)
+def load_timestamps(run_id):
+    df_ts = pd.read_csv("data/BTC.csv")
+    df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+    return rotated_time_sort(df_ts["timestamp"].unique())
 
-t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
-t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+timestamps = load_timestamps(st.session_state.run_id)
+
+t1 = st.selectbox(
+    "Time 1 (Latest)",
+    timestamps,
+    index=0,
+    key=f"t1_{st.session_state.run_id}"
+)
+
+t2 = st.selectbox(
+    "Time 2 (Previous)",
+    timestamps,
+    index=1,
+    key=f"t2_{st.session_state.run_id}"
+)
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -311,6 +327,3 @@ st.dataframe(
 )
 
 st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
-
-
-
