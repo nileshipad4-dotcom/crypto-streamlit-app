@@ -55,13 +55,16 @@ def get_ist_hhmm():
     return get_ist_datetime().strftime("%H:%M")
 
 def safe_ratio(a, b):
-    if b is None:
+    try:
+        if b is None:
+            return None
+        if pd.isna(b):
+            return None
+        if float(b) == 0.0:
+            return None
+        return float(a) / float(b)
+    except Exception:
         return None
-    if pd.isna(b):
-        return None
-    if b == 0:
-        return None
-    return a / b
 
 
 def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
@@ -277,4 +280,3 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
-
