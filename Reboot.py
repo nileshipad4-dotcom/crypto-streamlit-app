@@ -9,7 +9,7 @@ import time
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("⏱ Crypto Timestamp Selector")
+st.title("⏱ Crypto Time Selector")
 
 # -------------------------------------------------
 # CONSTANTS
@@ -20,7 +20,7 @@ BASE_URL = (
     "refs/heads/main/data/"
 )
 
-PIVOT_TIME = "17:30"  # circular sort anchor
+PIVOT_TIME = "17:30"
 
 # -------------------------------------------------
 # HELPERS
@@ -43,10 +43,6 @@ def fetch_csv_no_cache(url: str) -> pd.DataFrame:
 
 
 def extract_timestamps_desc(df, col_idx=14, pivot=PIVOT_TIME):
-    """
-    Circular descending order starting from pivot (17:30),
-    wrapping across midnight correctly.
-    """
     times = (
         df.iloc[:, col_idx]
         .astype(str)
@@ -76,24 +72,23 @@ if "asset" not in st.session_state:
 if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = None
+# -------------------------------------------------
+# TOP CONTROL BAR
+# -------------------------------------------------
+bar_col1, bar_col2 = st.columns([1, 8])
 
-# -------------------------------------------------
-# ASSET SELECTOR
-# -------------------------------------------------
-st.selectbox(
-    "Select Asset",
-    ["BTC", "ETH"],
-    key="asset",
-)
+with bar_col1:
+    st.selectbox(
+        "",
+        ["BTC", "ETH"],
+        key="asset",
+        label_visibility="collapsed",
+    )
+
+with bar_col2:
+    refresh = st.button("⏱")
 
 csv_url = f"{BASE_URL}{st.session_state.asset}.csv"
-
-# -------------------------------------------------
-# MANUAL REFRESH BUTTON
-# -------------------------------------------------
-refresh = st.button("⏱ Time Refresh")
 
 # -------------------------------------------------
 # FETCH DATA (ONLY ON BUTTON CLICK)
@@ -102,37 +97,34 @@ if refresh:
     try:
         df = fetch_csv_no_cache(csv_url)
         st.session_state.timestamps = extract_timestamps_desc(df)
-        st.session_state.last_refresh = datetime.utcnow()
     except Exception as e:
         st.error(f"❌ Data fetch failed: {e}")
 
 # -------------------------------------------------
-# TIMESTAMP DROPDOWNS
+# TIMESTAMP DROPDOWNS (SAME LINE)
 # -------------------------------------------------
 timestamps = st.session_state.timestamps
 
 if timestamps:
-    col1, col2 = st.columns(2)
+    default_1 = 0
+    default_2 = 1 if len(timestamps) > 1 else 0
 
-    with col1:
+    t_col1, t_col2 = st.columns(2)
+
+    with t_col1:
         st.selectbox(
-            "Timestamp 1",
+            "",
             timestamps,
+            index=default_1,
             key="t1",
+            label_visibility="collapsed",
         )
 
-    with col2:
+    with t_col2:
         st.selectbox(
-            "Timestamp 2",
+            "",
             timestamps,
+            index=default_2,
             key="t2",
+            label_visibility="collapsed",
         )
-
-# -------------------------------------------------
-# LAST REFRESH TIME (ONLY INFO SHOWN)
-# -------------------------------------------------
-if st.session_state.last_refresh:
-    st.caption(
-        "Last refreshed (UTC): "
-        f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}"
-    )
