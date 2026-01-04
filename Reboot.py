@@ -9,7 +9,16 @@ import time
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("🧪 CSV Real-Time Debugger (Correct Streamlit Model)")
+st.title("⏱ Crypto Timestamp Viewer")
+
+# -------------------------------------------------
+# CONSTANTS
+# -------------------------------------------------
+CSV_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "refs/heads/main/data/ETH.csv"
+)
 
 # -------------------------------------------------
 # HELPERS
@@ -33,8 +42,8 @@ def fetch_csv_strong_no_cache(url: str) -> pd.DataFrame:
     r.raise_for_status()
     return pd.read_csv(StringIO(r.text))
 
-def extract_timestamps(df, col_idx=14):
-    return (
+def extract_all_timestamps(df, col_idx=14):
+    ts = (
         df.iloc[:, col_idx]
         .astype(str)
         .str[:5]
@@ -42,18 +51,7 @@ def extract_timestamps(df, col_idx=14):
         .unique()
         .tolist()
     )
-
-def find_matching_timestamp(timestamps, now_dt):
-    probe = now_dt.replace(second=0, microsecond=0)
-    ts_set = set(timestamps)
-
-    for i in range(180):
-        s = probe.strftime("%H:%M")
-        if s in ts_set:
-            return s, i
-        probe -= timedelta(minutes=1)
-
-    return None, None
+    return sorted(ts)
 
 # -------------------------------------------------
 # SESSION STATE INIT
@@ -61,58 +59,76 @@ def find_matching_timestamp(timestamps, now_dt):
 if "df" not in st.session_state:
     st.session_state.df = None
 
+if "timestamps" not in st.session_state:
+    st.session_state.timestamps = []
+
 if "last_fetch" not in st.session_state:
     st.session_state.last_fetch = None
 
 # -------------------------------------------------
-# INPUT UI
+# UI — REFRESH BUTTON
 # -------------------------------------------------
-st.subheader("🔗 Paste CSV RAW URL")
+st.subheader("📡 Data Source: ETH.csv (GitHub Raw)")
 
-csv_url = st.text_input(
-    "CSV Raw URL",
-    placeholder="https://raw.githubusercontent.com/.../BTC.csv",
-)
-
-fetch_btn = st.button("🔄 Fetch CSV NOW (Fresh Load)")
+refresh_btn = st.button("⏱ Time Refresh")
 
 # -------------------------------------------------
-# FETCH (ONLY WHEN BUTTON IS PRESSED)
+# FETCH ON BUTTON CLICK
 # -------------------------------------------------
-if fetch_btn:
+if refresh_btn:
     try:
-        df = fetch_csv_strong_no_cache(csv_url)
+        df = fetch_csv_strong_no_cache(CSV_URL)
         st.session_state.df = df
+        st.session_state.timestamps = extract_all_timestamps(df)
         st.session_state.last_fetch = datetime.utcnow()
-        st.success("✅ CSV fetched fresh from source")
+        st.success("✅ Data refreshed successfully")
 
     except Exception as e:
         st.error(f"❌ Fetch failed: {e}")
 
 # -------------------------------------------------
-# DISPLAY (USES SESSION STATE)
+# DISPLAY
 # -------------------------------------------------
 if st.session_state.df is not None:
     df = st.session_state.df
+    timestamps = st.session_state.timestamps
 
     now_ist = get_ist_datetime()
     st.write("🕒 Current IST:", now_ist.strftime("%Y-%m-%d %H:%M:%S"))
-    st.write("🕒 Last Fetch UTC:", st.session_state.last_fetch)
+    st.write("🕒 Last Refresh (UTC):", st.session_state.last_fetch)
     st.write("📦 Rows:", len(df))
     st.write("📦 Columns:", list(df.columns))
 
-    timestamps = extract_timestamps(df)
-    st.write("⏱ Last 10 timestamps:", sorted(timestamps)[-10:])
+    st.divider()
 
-    t1, back_minutes = find_matching_timestamp(timestamps, now_ist)
+    # -------------------------------------------------
+    # TIMESTAMP DROPDOWNS (TWO)
+    # -------------------------------------------------
+    st.subheader("⏰ Select Timestamps")
 
-    if t1:
-        st.success(f"🎯 Matching timestamp: {t1} ({back_minutes} min back)")
-    else:
-        st.error("❌ No timestamp match found")
+    col1, col2 = st.columns(2)
 
+    with col1:
+        t1 = st.selectbox(
+            "Time 1",
+            timestamps,
+            index=0 if timestamps else None,
+        )
+
+    with col2:
+        t2 = st.selectbox(
+            "Time 2",
+            timestamps,
+            index=len(timestamps) - 1 if timestamps else None,
+        )
+
+    st.info(f"Selected Times → ⏱ {t1}  |  ⏱ {t2}")
+
+    # -------------------------------------------------
+    # PREVIEW
+    # -------------------------------------------------
     st.subheader("📄 CSV Preview — LAST 50 ROWS")
     st.dataframe(df.tail(50), use_container_width=True)
 
 else:
-    st.info("Click **Fetch CSV NOW** to load data")
+    st.info("Click **⏱ Time Refresh** to load ETH data")
