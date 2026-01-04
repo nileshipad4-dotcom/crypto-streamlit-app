@@ -4,7 +4,6 @@ import requests
 from datetime import datetime
 from io import StringIO
 import time
-from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -13,13 +12,15 @@ st.set_page_config(layout="wide")
 st.title("⏱ Crypto Timestamp Selector")
 
 # -------------------------------------------------
-# DEFAULT URL
+# CONSTANTS
 # -------------------------------------------------
-DEFAULT_CSV_URL = (
+BASE_URL = (
     "https://raw.githubusercontent.com/"
     "nileshipad4-dotcom/crypto-streamlit-app/"
-    "refs/heads/main/data/ETH.csv"
+    "refs/heads/main/data/"
 )
+
+PIVOT_TIME = "17:30"  # circular sort anchor
 
 # -------------------------------------------------
 # HELPERS
@@ -40,8 +41,13 @@ def fetch_csv_no_cache(url: str) -> pd.DataFrame:
     r.raise_for_status()
     return pd.read_csv(StringIO(r.text))
 
-def extract_timestamps(df, col_idx=14):
-    return sorted(
+
+def extract_timestamps_desc(df, col_idx=14, pivot=PIVOT_TIME):
+    """
+    Circular descending order starting from pivot (17:30),
+    wrapping across midnight correctly.
+    """
+    times = (
         df.iloc[:, col_idx]
         .astype(str)
         .str[:5]
@@ -50,11 +56,22 @@ def extract_timestamps(df, col_idx=14):
         .tolist()
     )
 
+    def to_minutes(t):
+        h, m = map(int, t.split(":"))
+        return h * 60 + m
+
+    pivot_min = to_minutes(pivot)
+
+    def circular_key(t):
+        return (pivot_min - to_minutes(t)) % (24 * 60)
+
+    return sorted(times, key=circular_key)
+
 # -------------------------------------------------
 # SESSION STATE INIT
 # -------------------------------------------------
-if "csv_url" not in st.session_state:
-    st.session_state.csv_url = DEFAULT_CSV_URL
+if "asset" not in st.session_state:
+    st.session_state.asset = "ETH"
 
 if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
@@ -63,34 +80,31 @@ if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = None
 
 # -------------------------------------------------
-# URL INPUT (EDITABLE)
+# ASSET SELECTOR
 # -------------------------------------------------
-st.text_input(
-    "CSV Raw URL",
-    key="csv_url",
-    help="Paste any raw GitHub / CDN CSV URL",
+st.selectbox(
+    "Select Asset",
+    ["BTC", "ETH"],
+    key="asset",
 )
 
-# -------------------------------------------------
-# AUTO REFRESH (EVERY 10 SECONDS)
-# -------------------------------------------------
-st_autorefresh(interval=10_000, key="auto_refresh")
+csv_url = f"{BASE_URL}{st.session_state.asset}.csv"
 
 # -------------------------------------------------
 # MANUAL REFRESH BUTTON
 # -------------------------------------------------
-st.button("⏱ Time Refresh")
+refresh = st.button("⏱ Time Refresh")
 
 # -------------------------------------------------
-# FETCH DATA (AUTO + MANUAL)
+# FETCH DATA (ONLY ON BUTTON CLICK)
 # -------------------------------------------------
-try:
-    df = fetch_csv_no_cache(st.session_state.csv_url)
-    st.session_state.timestamps = extract_timestamps(df)
-    st.session_state.last_refresh = datetime.utcnow()
-
-except Exception as e:
-    st.error(f"❌ Data fetch failed: {e}")
+if refresh:
+    try:
+        df = fetch_csv_no_cache(csv_url)
+        st.session_state.timestamps = extract_timestamps_desc(df)
+        st.session_state.last_refresh = datetime.utcnow()
+    except Exception as e:
+        st.error(f"❌ Data fetch failed: {e}")
 
 # -------------------------------------------------
 # TIMESTAMP DROPDOWNS
@@ -101,10 +115,18 @@ if timestamps:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.selectbox("Timestamp 1", timestamps, key="t1")
+        st.selectbox(
+            "Timestamp 1",
+            timestamps,
+            key="t1",
+        )
 
     with col2:
-        st.selectbox("Timestamp 2", timestamps, key="t2")
+        st.selectbox(
+            "Timestamp 2",
+            timestamps,
+            key="t2",
+        )
 
 # -------------------------------------------------
 # LAST REFRESH TIME (ONLY INFO SHOWN)
