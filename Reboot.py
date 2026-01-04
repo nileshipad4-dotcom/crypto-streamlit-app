@@ -22,12 +22,6 @@ def hard_reset_state():
         del st.session_state[key]
 
 def fetch_csv_strong_no_cache(url: str) -> pd.DataFrame:
-    """
-    Fetch CSV with:
-    - hard cache busting
-    - new HTTP session
-    - no reuse of connections
-    """
     cache_buster = int(time.time() * 1000)
     url = f"{url}?cb={cache_buster}"
 
@@ -58,7 +52,7 @@ def find_matching_timestamp(timestamps, now_dt):
     ts_set = set(timestamps)
     probe = now_dt.replace(second=0, microsecond=0)
 
-    for i in range(180):  # look back 3 hours
+    for i in range(180):
         s = probe.strftime("%H:%M")
         if s in ts_set:
             return s, i
@@ -84,7 +78,7 @@ fetch_btn = st.button("🔄 Fetch CSV NOW (Hard Reload)")
 # -------------------------------------------------
 if fetch_btn:
     hard_reset_state()
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------------------------
 # FETCH + DISPLAY
@@ -95,15 +89,12 @@ if csv_url:
 
         st.success("✅ CSV fetched successfully (fresh load, no cache)")
 
-        # --- Metadata ---
         now_ist = get_ist_datetime()
         st.write("🕒 Current IST:", now_ist.strftime("%Y-%m-%d %H:%M:%S"))
         st.write("📦 Rows in CSV:", len(df))
         st.write("📦 Columns in CSV:", list(df.columns))
 
-        # --- Timestamp logic ---
         timestamps = extract_timestamps(df)
-
         st.write("⏱ Last 10 unique timestamps:", sorted(timestamps)[-10:])
 
         t1, back_minutes = find_matching_timestamp(timestamps, now_ist)
@@ -114,9 +105,8 @@ if csv_url:
                 f"(matched {back_minutes} minute(s) back)"
             )
         else:
-            st.error("❌ No timestamp matches current IST (even after backtracking)")
+            st.error("❌ No timestamp matches current IST")
 
-        # --- Preview ---
         st.subheader("📄 CSV Preview — LAST 50 ROWS")
         st.dataframe(df.tail(50), use_container_width=True)
 
