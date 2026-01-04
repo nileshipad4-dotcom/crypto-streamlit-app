@@ -1,32 +1,19 @@
-# crypto compare — time-aligned CSV logic (NO CACHE, NO STALE STATE)
-
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------------------------
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("📊 Strike-wise Comparison + Live Snapshot")
-
-# -------------------------------------------------
-# AUTO REFRESH (60s)
-# -------------------------------------------------
-st_autorefresh(interval=60_000, key="auto_refresh")
+st.title("📊 CSV-based Timestamp Selector (Live Update)")
 
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
 def get_ist_datetime():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
-
-def get_ist_time_str(dt=None):
-    if dt is None:
-        dt = get_ist_datetime()
-    return dt.strftime("%H:%M")
 
 def rotated_time_sort(times, pivot="17:30"):
     pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
@@ -35,172 +22,126 @@ def rotated_time_sort(times, pivot="17:30"):
         return ((h * 60 + m) - pivot_minutes) % (24 * 60)
     return sorted(times, key=key, reverse=True)
 
-def safe_ratio(a, b):
-    return a / b if b and not pd.isna(b) else None
-
-def find_latest_matching_times(csv_times, now_dt):
+def find_t1_t2_from_csv(timestamps, now_dt):
     """
-    Walk backward minute-by-minute until a timestamp is found.
-    Returns (t1, t2)
+    timestamps: list of HH:MM strings from CSV
+    returns (t1, t2)
     """
-    csv_set = set(csv_times)
+    ts_set = set(timestamps)
+    sorted_ts = rotated_time_sort(timestamps)
 
     probe = now_dt.replace(second=0, microsecond=0)
-    for _ in range(180):  # search back up to 3 hours
+
+    for _ in range(300):  # look back up to 5 hours
         probe_str = probe.strftime("%H:%M")
-        if probe_str in csv_set:
-            sorted_times = rotated_time_sort(csv_times)
-            idx = sorted_times.index(probe_str)
-            t2 = sorted_times[idx + 1] if idx + 1 < len(sorted_times) else None
+        if probe_str in ts_set:
+            idx = sorted_ts.index(probe_str)
+            t2 = sorted_ts[idx + 1] if idx + 1 < len(sorted_ts) else None
             return probe_str, t2
         probe -= timedelta(minutes=1)
 
     return None, None
 
 # -------------------------------------------------
-# CONFIG
+# SESSION STATE INIT
 # -------------------------------------------------
-API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "05-01-2026"
-ASSETS = ["BTC", "ETH"]
+if "timestamps" not in st.session_state:
+    st.session_state.timestamps = []
 
-BTC_CSV_URL = (
-    "https://raw.githubusercontent.com/"
-    "nileshipad4-dotcom/crypto-streamlit-app/"
-    "refs/heads/main/data/BTC.csv"
+if "t1" not in st.session_state:
+    st.session_state.t1 = None
+
+if "t2" not in st.session_state:
+    st.session_state.t2 = None
+
+if "df_csv" not in st.session_state:
+    st.session_state.df_csv = None
+
+# -------------------------------------------------
+# CSV URL INPUT
+# -------------------------------------------------
+st.subheader("🔗 Enter CSV Raw File URL")
+
+csv_url = st.text_input(
+    "CSV Raw URL (GitHub / S3 / public link)",
+    placeholder="https://raw.githubusercontent.com/....csv"
 )
 
-ETH_CSV_URL = (
-    "https://raw.githubusercontent.com/"
-    "nileshipad4-dotcom/crypto-streamlit-app/"
-    "refs/heads/main/data/ETH.csv"
-)
-
-CSV_URLS = {
-    "BTC": BTC_CSV_URL,
-    "ETH": ETH_CSV_URL,
-}
-
-STRIKE_COL_IDX = 6
-TIMESTAMP_COL_IDX = 14
-VALUE_COL_IDX = 19
-
-CALL_OI_COL_IDX = 1
-PUT_OI_COL_IDX = 11
-CALL_VOL_COL_IDX = 2
-PUT_VOL_COL_IDX = 10
-
-CALL_GAMMA_COL_IDX = 3
-CALL_DELTA_COL_IDX = 4
-CALL_VEGA_COL_IDX = 5
-PUT_GAMMA_COL_IDX = 7
-PUT_DELTA_COL_IDX = 8
-PUT_VEGA_COL_IDX = 9
+update_clicked = st.button("🔄 Update")
 
 # -------------------------------------------------
-# LIVE PRICE
+# UPDATE LOGIC (CORE)
 # -------------------------------------------------
-def get_delta_price(symbol):
+if update_clicked:
     try:
-        r = requests.get(API_BASE, timeout=10).json()["result"]
-        return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
-    except:
-        return None
+        # Read CSV fresh every time
+        df = pd.read_csv(csv_url)
 
-prices = {a: get_delta_price(a) for a in ASSETS}
+        # Extract timestamps (assumes HH:MM format)
+        TIMESTAMP_COL_IDX = 14
+        df["timestamp"] = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
 
-c1, c2 = st.columns(2)
-c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
-c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
+        timestamps = (
+            df["timestamp"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        if not timestamps:
+            st.error("No timestamps found in CSV")
+        else:
+            now_ist = get_ist_datetime()
+            t1, t2 = find_t1_t2_from_csv(timestamps, now_ist)
+
+            if not t1:
+                st.error("No matching timestamp found relative to current time")
+            else:
+                st.session_state.df_csv = df
+                st.session_state.timestamps = rotated_time_sort(timestamps)
+                st.session_state.t1 = t1
+                st.session_state.t2 = t2
+
+                st.success(
+                    f"Timestamps updated → T1: {t1} | T2: {t2}"
+                )
+
+    except Exception as e:
+        st.error(f"Failed to read CSV: {e}")
 
 # -------------------------------------------------
-# READ CSV FRESH (EVERY RUN)
+# TIMESTAMP DROPDOWNS
 # -------------------------------------------------
-df_ts = pd.read_csv(BTC_CSV_URL)
-df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
-all_times = df_ts["timestamp"].dropna().unique().tolist()
+if st.session_state.timestamps:
 
-now_ist = get_ist_datetime()
-t1, t2 = find_latest_matching_times(all_times, now_ist)
+    st.subheader("⏱ Timestamp Selection")
 
-if not t1 or not t2:
-    st.error("No valid timestamps found in CSV")
-    st.stop()
+    t1 = st.selectbox(
+        "Timestamp 1 (Auto-detected)",
+        st.session_state.timestamps,
+        index=st.session_state.timestamps.index(st.session_state.t1)
+        if st.session_state.t1 in st.session_state.timestamps else 0,
+        key="t1_select"
+    )
 
-st.caption(f"🕒 Auto-selected timestamps → T1: {t1} | T2: {t2}")
+    t2 = st.selectbox(
+        "Timestamp 2 (Previous)",
+        st.session_state.timestamps,
+        index=st.session_state.timestamps.index(st.session_state.t2)
+        if st.session_state.t2 in st.session_state.timestamps else 1,
+        key="t2_select"
+    )
+
+    st.caption(
+        f"🕒 Current IST: {get_ist_datetime().strftime('%H:%M')} | "
+        f"CSV rows loaded: {len(st.session_state.df_csv)}"
+    )
 
 # -------------------------------------------------
-# PCR COLLECTION
+# DEBUG VIEW (OPTIONAL BUT USEFUL)
 # -------------------------------------------------
-pcr_rows = []
-
-# =================================================
-# MAIN LOOP
-# =================================================
-for UNDERLYING in ASSETS:
-
-    df_raw = pd.read_csv(CSV_URLS[UNDERLYING])
-
-    df = pd.DataFrame({
-        "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
-        "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
-        "call_oi": pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-        "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
-        "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
-        "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
-        "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
-        "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
-        "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
-        "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
-        "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
-        "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
-    }).dropna(subset=["strike_price", "timestamp"])
-
-    # PCR historical
-    pcr_t1_oi = safe_ratio(
-        df[df["timestamp"] == t1]["put_oi"].sum(),
-        df[df["timestamp"] == t1]["call_oi"].sum(),
-    )
-
-    pcr_t2_oi = safe_ratio(
-        df[df["timestamp"] == t2]["put_oi"].sum(),
-        df[df["timestamp"] == t2]["call_oi"].sum(),
-    )
-
-    # ---------------- LIVE CHAIN ----------------
-    df_live = pd.json_normalize(
-        requests.get(
-            f"{API_BASE}?contract_types=call_options,put_options"
-            f"&underlying_asset_symbols={UNDERLYING}"
-            f"&expiry_date={EXPIRY}",
-            timeout=20
-        ).json()["result"]
-    )
-
-    df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
-    df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
-
-    pcr_live_oi = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "oi_contracts"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "oi_contracts"].sum(),
-    )
-
-    pcr_rows.append([
-        UNDERLYING,
-        pcr_live_oi,
-        pcr_t1_oi,
-        pcr_t2_oi,
-    ])
-
-    # -------------------------------------------------
-    # DISPLAY PCR
-    # -------------------------------------------------
-    st.subheader(f"{UNDERLYING} PCR")
-    st.write({
-        "PCR OI (Live)": pcr_live_oi,
-        f"PCR OI ({t1})": pcr_t1_oi,
-        f"PCR OI ({t2})": pcr_t2_oi,
-    })
-
-st.caption("✅ CSV read fresh every run | timestamps auto-aligned to clock")
+with st.expander("🔍 Debug: CSV Preview"):
+    if st.session_state.df_csv is not None:
+        st.dataframe(st.session_state.df_csv.head(20))
+    else:
+        st.write("No CSV loaded yet.")
