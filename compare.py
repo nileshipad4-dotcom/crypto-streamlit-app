@@ -1,9 +1,10 @@
-# crypto compare
+# crypto compare — FINAL COMPLETE VERSION (EXPIRY + MP + PCR FIXED)
 
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+import calendar
+from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------------------------
@@ -13,59 +14,125 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # -------------------------------------------------
-# FORCE FRESH RUN TOKEN (KEY FIX)
+# FORCE FRESH RUN TOKEN
 # -------------------------------------------------
 if "run_id" not in st.session_state:
     st.session_state.run_id = 0
 
 # -------------------------------------------------
-# AUTO REFRESH (60s) + CACHE CLEAR
+# AUTO REFRESH (60s)
 # -------------------------------------------------
 if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
     st.session_state.run_id += 1
 
 # -------------------------------------------------
-# HELPERS
+# CONSTANTS
 # -------------------------------------------------
-def get_ist_time():
-    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+BASE_RAW_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "refs/heads/main/data/"
+)
 
-def rotated_time_sort(times, pivot="17:30"):
-    pivot_minutes = int(pivot[:2]) * 60 + int(pivot[3:])
-    def key(t):
-        h, m = map(int, t.split(":"))
-        return ((h * 60 + m) - pivot_minutes) % (24 * 60)
-    return sorted(times, key=key, reverse=True)
-
-def safe_ratio(a, b):
-    return a / b if b and not pd.isna(b) else None
-
-# -------------------------------------------------
-# CONFIG
-# -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
-EXPIRY = "05-01-2026"
 ASSETS = ["BTC", "ETH"]
+PIVOT_TIME = "17:30"
 
 STRIKE_COL_IDX = 6
 TIMESTAMP_COL_IDX = 14
 VALUE_COL_IDX = 19
-
 CALL_OI_COL_IDX = 1
 PUT_OI_COL_IDX = 11
-CALL_VOL_COL_IDX = 2
-PUT_VOL_COL_IDX = 10
-
-CALL_GAMMA_COL_IDX = 3
-CALL_DELTA_COL_IDX = 4
-CALL_VEGA_COL_IDX = 5
-PUT_GAMMA_COL_IDX = 7
-PUT_DELTA_COL_IDX = 8
-PUT_VEGA_COL_IDX = 9
 
 # -------------------------------------------------
-# LIVE PRICE
+# HELPERS
+# -------------------------------------------------
+def get_ist_datetime():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+def get_ist_hhmm():
+    return get_ist_datetime().strftime("%H:%M")
+
+def safe_ratio(a, b):
+    return a / b if b and not pd.isna(b) else None
+
+def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
+    df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
+    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5].dropna().unique().tolist()
+    pivot_m = int(pivot[:2]) * 60 + int(pivot[3:])
+    return sorted(times, key=lambda t: (pivot_m - (int(t[:2])*60 + int(t[3:]))) % 1440)
+
+# -------------------
+# ✅ FINAL EXPIRY LOGIC (NO EXPIRED, NO LEAKS)
+# -------------------
+def get_expiries():
+    ist_now = get_ist_datetime()
+    today = ist_now.date()
+
+    if ist_now.time() <= datetime.strptime("17:30", "%H:%M").time():
+        latest_valid = today
+    else:
+        latest_valid = today + timedelta(days=1)
+
+    expiries = set()
+    expiries.add(latest_valid)
+
+    d = today
+    while d.weekday() != calendar.FRIDAY:
+        d += timedelta(days=1)
+    if d >= latest_valid:
+        expiries.add(d)
+
+    year, month = today.year, today.month
+    cal = calendar.monthcalendar(year, month)
+    for week in cal:
+        if week[calendar.FRIDAY] != 0:
+            fd = date(year, month, week[calendar.FRIDAY])
+            if fd >= latest_valid:
+                expiries.add(fd)
+
+    for i in [1, 2]:
+        m = month + i
+        y = year + (m - 1) // 12
+        m = ((m - 1) % 12) + 1
+        cal = calendar.monthcalendar(y, m)
+        lf = max(week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0)
+        expiries.add(date(y, m, lf))
+
+    return sorted(
+        [d.strftime("%d-%m-%Y") for d in expiries],
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
+    )
+
+# -------------------------------------------------
+# ⏱ TIMESTAMP + EXPIRY CONTROLS
+# -------------------------------------------------
+if "ts_asset" not in st.session_state:
+    st.session_state.ts_asset = "ETH"
+
+if "timestamps" not in st.session_state:
+    st.session_state.timestamps = []
+
+c1, c2, c3 = st.columns([1, 6, 3])
+with c1:
+    st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
+with c2:
+    if st.button("⏱"):
+        st.session_state.timestamps = extract_fresh_timestamps_from_github(st.session_state.ts_asset)
+with c3:
+    expiry_list = get_expiries()
+    selected_expiry = st.selectbox("Expiry", expiry_list)
+
+if not st.session_state.timestamps:
+    st.session_state.timestamps = extract_fresh_timestamps_from_github(st.session_state.ts_asset)
+
+timestamps = st.session_state.timestamps
+t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
+t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+
+# -------------------------------------------------
+# LIVE PRICES
 # -------------------------------------------------
 @st.cache_data(ttl=10)
 def get_delta_price(symbol):
@@ -74,34 +141,9 @@ def get_delta_price(symbol):
 
 prices = {a: get_delta_price(a) for a in ASSETS}
 
-c1, c2 = st.columns(2)
-c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
-c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
-
-# -------------------------------------------------
-# FRESH TIMESTAMPS (NO STALE CACHE)
-# -------------------------------------------------
-@st.cache_data(ttl=0)
-def load_timestamps(run_id):
-    df_ts = pd.read_csv("data/BTC.csv")
-    df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
-    return rotated_time_sort(df_ts["timestamp"].unique())
-
-timestamps = load_timestamps(st.session_state.run_id)
-
-t1 = st.selectbox(
-    "Time 1 (Latest)",
-    timestamps,
-    index=0,
-    key=f"t1_{st.session_state.run_id}"
-)
-
-t2 = st.selectbox(
-    "Time 2 (Previous)",
-    timestamps,
-    index=1,
-    key=f"t2_{st.session_state.run_id}"
-)
+p1, p2 = st.columns(2)
+p1.metric("BTC Price", f"{int(prices['BTC']):,}")
+p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -120,145 +162,59 @@ for UNDERLYING in ASSETS:
         "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
         "call_oi": pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
         "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
-        "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
-        "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "call_gamma": pd.to_numeric(df_raw.iloc[:, CALL_GAMMA_COL_IDX], errors="coerce"),
-        "call_delta": pd.to_numeric(df_raw.iloc[:, CALL_DELTA_COL_IDX], errors="coerce"),
-        "call_vega": pd.to_numeric(df_raw.iloc[:, CALL_VEGA_COL_IDX], errors="coerce"),
-        "put_gamma": pd.to_numeric(df_raw.iloc[:, PUT_GAMMA_COL_IDX], errors="coerce"),
-        "put_delta": pd.to_numeric(df_raw.iloc[:, PUT_DELTA_COL_IDX], errors="coerce"),
-        "put_vega": pd.to_numeric(df_raw.iloc[:, PUT_VEGA_COL_IDX], errors="coerce"),
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
-    }).dropna(subset=["strike_price", "timestamp"])
+    }).dropna()
 
-    # PCR historical
-    pcr_t1_oi = safe_ratio(
-        df[df["timestamp"] == t1]["put_oi"].sum(),
-        df[df["timestamp"] == t1]["call_oi"].sum(),
-    )
+    df_t1 = df[df["timestamp"] == t1].groupby("strike_price")["value"].sum()
+    df_t2 = df[df["timestamp"] == t2].groupby("strike_price")["value"].sum()
 
-    pcr_t2_oi = safe_ratio(
-        df[df["timestamp"] == t2]["put_oi"].sum(),
-        df[df["timestamp"] == t2]["call_oi"].sum(),
-    )
+    merged = pd.concat([df_t1, df_t2], axis=1)
+    merged.columns = [f"MP ({t1})", f"MP ({t2})"]
+    merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
 
-    # ---------------- LIVE CHAIN ----------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
             f"&underlying_asset_symbols={UNDERLYING}"
-            f"&expiry_date={EXPIRY}",
-            timeout=20
+            f"&expiry_date={selected_expiry}",
+            timeout=20,
         ).json()["result"]
     )
 
-    df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
-    df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
-
-    pcr_live_oi = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "oi_contracts"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "oi_contracts"].sum(),
-    )
-
-    pcr_live_vol = safe_ratio(
-        df_live.loc[df_live["contract_type"] == "put_options", "volume"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum(),
-    )
-
-    pcr_rows.append([
-        UNDERLYING,
-        pcr_live_oi,
-        pcr_t1_oi,
-        pcr_t2_oi,
-        pcr_live_vol,
-        None,
-        None,
-    ])
-
-    # -------------------------------------------------
-    # HISTORICAL MAX PAIN
-    # -------------------------------------------------
-    df_t1 = (
-        df[df["timestamp"] == t1]
-        .groupby("strike_price", as_index=False)["value"]
-        .sum()
-        .rename(columns={"value": t1})
-    )
-
-    df_t2 = (
-        df[df["timestamp"] == t2]
-        .groupby("strike_price", as_index=False)["value"]
-        .sum()
-        .rename(columns={"value": t2})
-    )
-
-    merged = pd.merge(df_t1, df_t2, on="strike_price", how="outer")
-    merged["Change"] = merged[t1] - merged[t2]
-
-    # -------------------------------------------------
-    # LIVE MAX PAIN
-    # -------------------------------------------------
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
     for c in ["strike_price", "mark_price", "oi_contracts"]:
         df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
 
-    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
-    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
+    calls = df_mp[df_mp["contract_type"] == "call_options"]
+    puts = df_mp[df_mp["contract_type"] == "put_options"]
 
-    live_mp = pd.merge(
-        calls_mp.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-        puts_mp.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+    mp = pd.merge(
+        calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+        puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
         on="strike_price",
         how="outer",
     ).sort_values("strike_price")
 
     def compute_max_pain(df):
-        A = df["call_mark"].fillna(0).values
-        B = df["call_oi"].fillna(0).values
-        G = df["strike_price"].values
-        L = df["put_oi"].fillna(0).values
-        M = df["put_mark"].fillna(0).values
-
+        A, B = df["call_mark"].fillna(0), df["call_oi"].fillna(0)
+        G = df["strike_price"]
+        L, M = df["put_oi"].fillna(0), df["put_mark"].fillna(0)
         df["Current"] = [
-            round(
-                (
-                    -sum(A[i:] * B[i:])
-                    + G[i] * sum(B[:i])
-                    - sum(G[:i] * B[:i])
-                    - sum(M[:i] * L[:i])
-                    + sum(G[i:] * L[i:])
-                    - G[i] * sum(L[i:])
-                ) / 10000
-            )
+            (
+                -sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+                - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+            ) / 10000
             for i in range(len(df))
         ]
         return df[["strike_price", "Current"]]
 
-    live_mp = compute_max_pain(live_mp)
+    live_mp = compute_max_pain(mp)
+    now_ts = get_ist_hhmm()
+    live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
-    # -------------------------------------------------
-    # FINAL MERGE
-    # -------------------------------------------------
     final = merged.merge(live_mp, on="strike_price", how="left")
-
-    final["Current − Time1"] = final["Current"] - final[t1]
-    final["ΔΔ MP 1"] = -1 * (
-        final["Current − Time1"].shift(-1) - final["Current − Time1"]
-    )
-
-    now_ts = get_ist_time()
-
-    final = final.rename(columns={
-        "Current": f"MP ({now_ts})",
-        t1: f"MP ({t1})",
-        t2: f"MP ({t2})",
-        "Current − Time1": "△ MP 1",
-        "Change": "△ MP 2",
-    })
-
-    final["ΔΔ MP 2"] = -1 * (
-        final["△ MP 2"].shift(-1) - final["△ MP 2"]
-    )
+    final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
+    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
 
     final = final[
         [
@@ -269,61 +225,48 @@ for UNDERLYING in ASSETS:
             "△ MP 1",
             "△ MP 2",
             "ΔΔ MP 1",
-            "ΔΔ MP 2",
         ]
-    ].round(0).astype("Int64")
+    ].round(0).astype("Int64").reset_index(drop=True)
 
-    # -------------------------------------------------
-    # HIGHLIGHTING
-    # -------------------------------------------------
-    mp_cur = f"MP ({now_ts})"
-    atm_low = atm_high = None
-
-    if prices[UNDERLYING]:
-        strikes = final["strike_price"].astype(float).tolist()
-        atm_low = max([s for s in strikes if s <= prices[UNDERLYING]], default=None)
-        atm_high = min([s for s in strikes if s >= prices[UNDERLYING]], default=None)
-
-    min_mp = final[mp_cur].min()
+    atm = prices[UNDERLYING]
+    strikes = final["strike_price"].astype(float).tolist()
+    atm_low = max([s for s in strikes if s <= atm], default=None)
+    atm_high = min([s for s in strikes if s >= atm], default=None)
+    min_mp = final[f"MP ({now_ts})"].min()
 
     def highlight(row):
         if row["strike_price"] in (atm_low, atm_high):
             return ["background-color:#4B0082"] * len(row)
-        if row[mp_cur] == min_mp:
+        if row[f"MP ({now_ts})"] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
         return [""] * len(row)
 
-    st.subheader(f"{UNDERLYING} Comparison — {t1} vs {t2}")
-    st.dataframe(
-        final.style.apply(highlight, axis=1),
-        use_container_width=True,
-        height=700,
-    )
+    st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
+    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True)
+
+    pcr_rows.append([
+        UNDERLYING,
+        safe_ratio(
+            df_live[df_live["contract_type"]=="put_options"]["oi_contracts"].sum(),
+            df_live[df_live["contract_type"]=="call_options"]["oi_contracts"].sum(),
+        ),
+        safe_ratio(
+            df[df["timestamp"]==t1]["put_oi"].sum(),
+            df[df["timestamp"]==t1]["call_oi"].sum(),
+        ),
+        safe_ratio(
+            df[df["timestamp"]==t2]["put_oi"].sum(),
+            df[df["timestamp"]==t2]["call_oi"].sum(),
+        ),
+    ])
 
 # -------------------------------------------------
-# PCR TABLES
+# PCR TABLE
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
-    columns=[
-        "Asset",
-        "PCR OI (Current)",
-        "PCR OI (T1)",
-        "PCR OI (T2)",
-        "PCR Vol (Current)",
-        "PCR Vol (T1)",
-        "PCR Vol (T2)",
-    ],
+    columns=["Asset", "PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]
 ).set_index("Asset")
 
-st.subheader("📊 PCR Snapshot — OI")
-st.dataframe(
-    pcr_df[["PCR OI (Current)", "PCR OI (T1)", "PCR OI (T2)"]].round(3)
-)
-
-st.subheader("📊 PCR Snapshot — Volume")
-st.dataframe(
-    pcr_df[["PCR Vol (Current)", "PCR Vol (T1)", "PCR Vol (T2)"]].round(3)
-)
-
-st.caption("🟡 ATM band | 🔴 Live Max Pain | △ = Strike diff | ΔΔ = slope")
+st.subheader("📊 PCR Snapshot")
+st.dataframe(pcr_df.round(3), use_container_width=True)
