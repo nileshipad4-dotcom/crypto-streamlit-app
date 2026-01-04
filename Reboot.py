@@ -1,4 +1,4 @@
-# crypto compare — FINAL (ALL FIXES APPLIED)
+# crypto compare — FINAL (COLUMN ORDER + INTEGER VALUES)
 
 import streamlit as st
 import pandas as pd
@@ -92,9 +92,9 @@ def get_delta_price(symbol):
 
 prices = {a: get_delta_price(a) for a in ASSETS}
 
-c1, c2 = st.columns(2)
-c1.metric("BTC Price", f"{int(prices['BTC']):,}")
-c2.metric("ETH Price", f"{int(prices['ETH']):,}")
+p1, p2 = st.columns(2)
+p1.metric("BTC Price", f"{int(prices['BTC']):,}")
+p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 
 # -------------------------------------------------
 # PCR COLLECTION
@@ -124,7 +124,7 @@ for UNDERLYING in ASSETS:
     merged.columns = [f"MP ({t1})", f"MP ({t2})"]
     merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
 
-    # LIVE MP (CORRECT)
+    # LIVE MP (CORRECT MAX PAIN)
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -139,7 +139,7 @@ for UNDERLYING in ASSETS:
     calls = df_live[df_live["contract_type"] == "call_options"]
     puts = df_live[df_live["contract_type"] == "put_options"]
 
-    live_mp = pd.merge(
+    mp = pd.merge(
         calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
         puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
         on="strike_price",
@@ -151,26 +151,38 @@ for UNDERLYING in ASSETS:
         G = df["strike_price"]
         L, M = df["put_oi"].fillna(0), df["put_mark"].fillna(0)
         df["Current"] = [
-            round(
-                (-sum(A[i:]*B[i:]) + G[i]*sum(B[:i]) - sum(G[:i]*B[:i])
-                 - sum(M[:i]*L[:i]) + sum(G[i:]*L[i:]) - G[i]*sum(L[i:])) / 10000
-            )
+            (
+                -sum(A[i:]*B[i:]) + G[i]*sum(B[:i]) - sum(G[:i]*B[:i])
+                - sum(M[:i]*L[:i]) + sum(G[i:]*L[i:]) - G[i]*sum(L[i:])
+            ) / 10000
             for i in range(len(df))
         ]
         return df[["strike_price", "Current"]]
 
-    live_mp = compute_mp(live_mp)
+    live_mp = compute_mp(mp)
     now_ts = get_ist_hhmm()
     live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
     final = merged.merge(live_mp, on="strike_price", how="left")
     final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
     final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
-    final = final.reset_index(drop=True)
 
-    # ATM BAND
+    # COLUMN ORDER + INTEGER CAST
+    final = final[
+        [
+            "strike_price",
+            f"MP ({now_ts})",
+            f"MP ({t1})",
+            f"MP ({t2})",
+            "△ MP 1",
+            "△ MP 2",
+            "ΔΔ MP 1",
+        ]
+    ].round(0).astype("Int64").reset_index(drop=True)
+
+    # HIGHLIGHTING
     atm = prices[UNDERLYING]
-    strikes = final["strike_price"].tolist()
+    strikes = final["strike_price"].astype(float).tolist()
     atm_low = max([s for s in strikes if s <= atm], default=None)
     atm_high = min([s for s in strikes if s >= atm], default=None)
     min_mp = final[f"MP ({now_ts})"].min()
@@ -183,7 +195,11 @@ for UNDERLYING in ASSETS:
         return [""] * len(row)
 
     st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
-    st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True)
+    st.dataframe(
+        final.style.apply(highlight, axis=1),
+        use_container_width=True,
+        height=700,
+    )
 
     # PCR
     pcr_rows.append([
