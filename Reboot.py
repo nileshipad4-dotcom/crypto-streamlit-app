@@ -1,4 +1,4 @@
-# crypto compare — FINAL FIXED VERSION
+# crypto compare
 
 import streamlit as st
 import pandas as pd
@@ -48,17 +48,10 @@ PUT_OI_COL_IDX = 11
 CALL_VOL_COL_IDX = 2
 PUT_VOL_COL_IDX = 10
 
-CALL_GAMMA_COL_IDX = 3
-CALL_DELTA_COL_IDX = 4
-CALL_VEGA_COL_IDX = 5
-PUT_GAMMA_COL_IDX = 7
-PUT_DELTA_COL_IDX = 8
-PUT_VEGA_COL_IDX = 9
-
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
-def get_ist_time():
+def get_ist_hhmm():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
 def safe_ratio(a, b):
@@ -66,7 +59,14 @@ def safe_ratio(a, b):
 
 def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
-    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5].dropna().unique().tolist()
+    times = (
+        df.iloc[:, TIMESTAMP_COL_IDX]
+        .astype(str)
+        .str[:5]
+        .dropna()
+        .unique()
+        .tolist()
+    )
 
     pivot_m = int(pivot[:2]) * 60 + int(pivot[3:])
     def key(t):
@@ -76,7 +76,7 @@ def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     return sorted(times, key=key)
 
 # -------------------------------------------------
-# ⏱ TIMESTAMP CONTROL
+# ⏱ TIMESTAMP CONTROL (RESTORED)
 # -------------------------------------------------
 if "ts_asset" not in st.session_state:
     st.session_state.ts_asset = "ETH"
@@ -85,17 +85,33 @@ if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
 c1, c2 = st.columns([1, 8])
+
 with c1:
     st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
+
 with c2:
     refresh_ts = st.button("⏱")
 
 if refresh_ts or not st.session_state.timestamps:
-    st.session_state.timestamps = extract_fresh_timestamps_from_github(st.session_state.ts_asset)
+    st.session_state.timestamps = extract_fresh_timestamps_from_github(
+        st.session_state.ts_asset
+    )
 
 timestamps = st.session_state.timestamps
-t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0, key=f"t1_{st.session_state.run_id}")
-t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1, key=f"t2_{st.session_state.run_id}")
+
+t1 = st.selectbox(
+    "Time 1 (Latest)",
+    timestamps,
+    index=0,
+    key=f"t1_{st.session_state.run_id}"
+)
+
+t2 = st.selectbox(
+    "Time 2 (Previous)",
+    timestamps,
+    index=1 if len(timestamps) > 1 else 0,
+    key=f"t2_{st.session_state.run_id}"
+)
 
 # -------------------------------------------------
 # LIVE PRICE
@@ -113,7 +129,7 @@ prices = {a: get_delta_price(a) for a in ASSETS}
 pcr_rows = []
 
 # =================================================
-# MAIN LOOP (RESTORED FULL LOGIC)
+# MAIN LOOP (UNCHANGED ANALYTICS)
 # =================================================
 for UNDERLYING in ASSETS:
 
@@ -145,9 +161,8 @@ for UNDERLYING in ASSETS:
         ).json()["result"]
     )
 
-    df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
-    df_live["mark_price"] = pd.to_numeric(df_live["mark_price"], errors="coerce")
-    df_live["strike_price"] = pd.to_numeric(df_live["strike_price"], errors="coerce")
+    for c in ["oi_contracts", "mark_price", "strike_price"]:
+        df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
 
     calls = df_live[df_live["contract_type"] == "call_options"]
     puts = df_live[df_live["contract_type"] == "put_options"]
@@ -160,25 +175,40 @@ for UNDERLYING in ASSETS:
         how="outer",
     ).fillna(0)
 
-    mp["MP (Live)"] = (
+    mp_live_col = f"MP ({get_ist_hhmm()})"
+    mp[mp_live_col] = (
         mp["mark_price_call"] * mp["oi_contracts_call"]
         + mp["mark_price_put"] * mp["oi_contracts_put"]
     ) / 10000
 
-    final = merged.merge(mp[["strike_price", "MP (Live)"]], on="strike_price", how="left")
-    final["△ MP 1"] = final["MP (Live)"] - final[f"MP ({t1})"]
-    final["ΔΔ MP 1"] = -(final["△ MP 1"].shift(-1) - final["△ MP 1"])
+    # ---------------- FINAL MERGE ----------------
+    final = merged.merge(mp[["strike_price", mp_live_col]], on="strike_price", how="left")
 
-    final = final.reset_index().sort_values("strike_price")
+    final["△ MP 1"] = final[mp_live_col] - final[f"MP ({t1})"]
+    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
+
+    final = final.reset_index(drop=True).sort_values("strike_price")
+
+    final = final[
+        [
+            "strike_price",
+            mp_live_col,
+            f"MP ({t1})",
+            f"MP ({t2})",
+            "△ MP 1",
+            "△ MP 2",
+            "ΔΔ MP 1",
+        ]
+    ].round(0).astype("Int64")
 
     # ---------------- HIGHLIGHTING ----------------
     atm = prices[UNDERLYING]
-    min_mp = final["MP (Live)"].min()
+    min_mp = final[mp_live_col].min()
 
     def highlight(row):
-        if row["strike_price"] == min_mp:
+        if row[mp_live_col] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
-        if atm and abs(row["strike_price"] - atm) < 1e-6:
+        if atm and row["strike_price"] == round(atm, -2):
             return ["background-color:#4B0082"] * len(row)
         return [""] * len(row)
 
@@ -190,7 +220,7 @@ for UNDERLYING in ASSETS:
     )
 
 # -------------------------------------------------
-# PCR TABLE (RESTORED)
+# PCR TABLE
 # -------------------------------------------------
 pcr_df = pd.DataFrame(
     pcr_rows,
