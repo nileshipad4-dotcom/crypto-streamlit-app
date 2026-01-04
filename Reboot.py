@@ -1,4 +1,4 @@
-# crypto compare
+# crypto compare — FINAL, CORRECT LIVE MP
 
 import streamlit as st
 import pandas as pd
@@ -76,7 +76,7 @@ def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     return sorted(times, key=key)
 
 # -------------------------------------------------
-# ⏱ TIMESTAMP CONTROL (RESTORED)
+# ⏱ TIMESTAMP CONTROL (AS YOU WANT IT)
 # -------------------------------------------------
 if "ts_asset" not in st.session_state:
     st.session_state.ts_asset = "ETH"
@@ -85,10 +85,8 @@ if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
 c1, c2 = st.columns([1, 8])
-
 with c1:
     st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
-
 with c2:
     refresh_ts = st.button("⏱")
 
@@ -103,14 +101,14 @@ t1 = st.selectbox(
     "Time 1 (Latest)",
     timestamps,
     index=0,
-    key=f"t1_{st.session_state.run_id}"
+    key=f"t1_{st.session_state.run_id}",
 )
 
 t2 = st.selectbox(
     "Time 2 (Previous)",
     timestamps,
-    index=1 if len(timestamps) > 1 else 0,
-    key=f"t2_{st.session_state.run_id}"
+    index=1,
+    key=f"t2_{st.session_state.run_id}",
 )
 
 # -------------------------------------------------
@@ -129,7 +127,7 @@ prices = {a: get_delta_price(a) for a in ASSETS}
 pcr_rows = []
 
 # =================================================
-# MAIN LOOP (UNCHANGED ANALYTICS)
+# MAIN LOOP (ANALYTICS UNCHANGED, LIVE MP FIXED)
 # =================================================
 for UNDERLYING in ASSETS:
 
@@ -151,7 +149,7 @@ for UNDERLYING in ASSETS:
     merged.columns = [f"MP ({t1})", f"MP ({t2})"]
     merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
 
-    # ---------------- LIVE MP ----------------
+    # ---------------- LIVE MP (CORRECT MAX PAIN) ----------------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -161,38 +159,70 @@ for UNDERLYING in ASSETS:
         ).json()["result"]
     )
 
-    for c in ["oi_contracts", "mark_price", "strike_price"]:
-        df_live[c] = pd.to_numeric(df_live[c], errors="coerce")
+    df_mp = df_live[
+        ["strike_price", "contract_type", "mark_price", "oi_contracts"]
+    ].copy()
 
-    calls = df_live[df_live["contract_type"] == "call_options"]
-    puts = df_live[df_live["contract_type"] == "put_options"]
+    for c in ["strike_price", "mark_price", "oi_contracts"]:
+        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
 
-    mp = pd.merge(
-        calls[["strike_price", "mark_price", "oi_contracts"]],
-        puts[["strike_price", "mark_price", "oi_contracts"]],
+    calls_mp = df_mp[df_mp["contract_type"] == "call_options"]
+    puts_mp = df_mp[df_mp["contract_type"] == "put_options"]
+
+    live_mp = pd.merge(
+        calls_mp.rename(columns={
+            "mark_price": "call_mark",
+            "oi_contracts": "call_oi",
+        }),
+        puts_mp.rename(columns={
+            "mark_price": "put_mark",
+            "oi_contracts": "put_oi",
+        }),
         on="strike_price",
-        suffixes=("_call", "_put"),
         how="outer",
-    ).fillna(0)
+    ).sort_values("strike_price")
 
-    mp_live_col = f"MP ({get_ist_hhmm()})"
-    mp[mp_live_col] = (
-        mp["mark_price_call"] * mp["oi_contracts_call"]
-        + mp["mark_price_put"] * mp["oi_contracts_put"]
-    ) / 10000
+    def compute_max_pain(df):
+        A = df["call_mark"].fillna(0).values
+        B = df["call_oi"].fillna(0).values
+        G = df["strike_price"].values
+        L = df["put_oi"].fillna(0).values
+        M = df["put_mark"].fillna(0).values
+
+        df["Current"] = [
+            round(
+                (
+                    -sum(A[i:] * B[i:])
+                    + G[i] * sum(B[:i])
+                    - sum(G[:i] * B[:i])
+                    - sum(M[:i] * L[:i])
+                    + sum(G[i:] * L[i:])
+                    - G[i] * sum(L[i:])
+                ) / 10000
+            )
+            for i in range(len(df))
+        ]
+        return df[["strike_price", "Current"]]
+
+    live_mp = compute_max_pain(live_mp)
+
+    now_ts = get_ist_hhmm()
+    live_mp = live_mp.rename(columns={"Current": f"MP ({now_ts})"})
 
     # ---------------- FINAL MERGE ----------------
-    final = merged.merge(mp[["strike_price", mp_live_col]], on="strike_price", how="left")
+    final = merged.merge(live_mp, on="strike_price", how="left")
 
-    final["△ MP 1"] = final[mp_live_col] - final[f"MP ({t1})"]
-    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
+    final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
+    final["ΔΔ MP 1"] = -1 * (
+        final["△ MP 1"].shift(-1) - final["△ MP 1"]
+    )
 
-    final = final.reset_index(drop=True).sort_values("strike_price")
+    final = final.sort_values("strike_price")
 
     final = final[
         [
             "strike_price",
-            mp_live_col,
+            f"MP ({now_ts})",
             f"MP ({t1})",
             f"MP ({t2})",
             "△ MP 1",
@@ -201,12 +231,14 @@ for UNDERLYING in ASSETS:
         ]
     ].round(0).astype("Int64")
 
+    final = final.reset_index(drop=True)
+
     # ---------------- HIGHLIGHTING ----------------
     atm = prices[UNDERLYING]
-    min_mp = final[mp_live_col].min()
+    min_mp = final[f"MP ({now_ts})"].min()
 
     def highlight(row):
-        if row[mp_live_col] == min_mp:
+        if row[f"MP ({now_ts})"] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
         if atm and row["strike_price"] == round(atm, -2):
             return ["background-color:#4B0082"] * len(row)
