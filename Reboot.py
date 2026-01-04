@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 from io import StringIO
 import time
+from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -19,8 +20,6 @@ CSV_URL = (
     "nileshipad4-dotcom/crypto-streamlit-app/"
     "refs/heads/main/data/ETH.csv"
 )
-
-REFRESH_INTERVAL_MS = 10_000  # 10 seconds
 
 # -------------------------------------------------
 # HELPERS
@@ -61,31 +60,27 @@ if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = None
 
 # -------------------------------------------------
-# AUTO REFRESH (EVERY 10s)
+# AUTO REFRESH EVERY 10 SECONDS (SAFE)
 # -------------------------------------------------
-st.autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
+st_autorefresh(interval=10_000, key="auto_refresh")
 
 # -------------------------------------------------
 # MANUAL REFRESH BUTTON
 # -------------------------------------------------
-if st.button("⏱ Time Refresh"):
-    st.session_state.force_refresh = True
-else:
-    st.session_state.force_refresh = False
+st.button("⏱ Time Refresh")
 
 # -------------------------------------------------
-# FETCH DATA (AUTO OR MANUAL)
+# FETCH DATA
 # -------------------------------------------------
 try:
     df = fetch_csv_no_cache(CSV_URL)
     st.session_state.timestamps = extract_timestamps(df)
     st.session_state.last_refresh = datetime.utcnow()
-
 except Exception as e:
     st.error(f"❌ Data fetch failed: {e}")
 
 # -------------------------------------------------
-# UI — TIMESTAMP DROPDOWNS
+# TIMESTAMP DROPDOWNS (ONLY UI)
 # -------------------------------------------------
 timestamps = st.session_state.timestamps
 
@@ -93,20 +88,10 @@ if timestamps:
     col1, col2 = st.columns(2)
 
     with col1:
-        t1 = st.selectbox(
-            "Timestamp 1",
-            timestamps,
-            index=0,
-            key="t1",
-        )
+        t1 = st.selectbox("Timestamp 1", timestamps, key="t1")
 
     with col2:
-        t2 = st.selectbox(
-            "Timestamp 2",
-            timestamps,
-            index=len(timestamps) - 1,
-            key="t2",
-        )
+        t2 = st.selectbox("Timestamp 2", timestamps, key="t2")
 
 # -------------------------------------------------
 # LAST REFRESH TIME (ONLY INFO SHOWN)
