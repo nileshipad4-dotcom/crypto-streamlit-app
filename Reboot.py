@@ -10,12 +10,12 @@ from streamlit_autorefresh import st_autorefresh
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("⏱ ETH Timestamp Selector")
+st.title("⏱ Crypto Timestamp Selector")
 
 # -------------------------------------------------
-# CONSTANTS
+# DEFAULT URL
 # -------------------------------------------------
-CSV_URL = (
+DEFAULT_CSV_URL = (
     "https://raw.githubusercontent.com/"
     "nileshipad4-dotcom/crypto-streamlit-app/"
     "refs/heads/main/data/ETH.csv"
@@ -53,6 +53,9 @@ def extract_timestamps(df, col_idx=14):
 # -------------------------------------------------
 # SESSION STATE INIT
 # -------------------------------------------------
+if "csv_url" not in st.session_state:
+    st.session_state.csv_url = DEFAULT_CSV_URL
+
 if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
@@ -60,7 +63,16 @@ if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = None
 
 # -------------------------------------------------
-# AUTO REFRESH EVERY 10 SECONDS (SAFE)
+# URL INPUT (EDITABLE)
+# -------------------------------------------------
+st.text_input(
+    "CSV Raw URL",
+    key="csv_url",
+    help="Paste any raw GitHub / CDN CSV URL",
+)
+
+# -------------------------------------------------
+# AUTO REFRESH (EVERY 10 SECONDS)
 # -------------------------------------------------
 st_autorefresh(interval=10_000, key="auto_refresh")
 
@@ -70,17 +82,18 @@ st_autorefresh(interval=10_000, key="auto_refresh")
 st.button("⏱ Time Refresh")
 
 # -------------------------------------------------
-# FETCH DATA
+# FETCH DATA (AUTO + MANUAL)
 # -------------------------------------------------
 try:
-    df = fetch_csv_no_cache(CSV_URL)
+    df = fetch_csv_no_cache(st.session_state.csv_url)
     st.session_state.timestamps = extract_timestamps(df)
     st.session_state.last_refresh = datetime.utcnow()
+
 except Exception as e:
     st.error(f"❌ Data fetch failed: {e}")
 
 # -------------------------------------------------
-# TIMESTAMP DROPDOWNS (ONLY UI)
+# TIMESTAMP DROPDOWNS
 # -------------------------------------------------
 timestamps = st.session_state.timestamps
 
@@ -88,16 +101,16 @@ if timestamps:
     col1, col2 = st.columns(2)
 
     with col1:
-        t1 = st.selectbox("Timestamp 1", timestamps, key="t1")
+        st.selectbox("Timestamp 1", timestamps, key="t1")
 
     with col2:
-        t2 = st.selectbox("Timestamp 2", timestamps, key="t2")
+        st.selectbox("Timestamp 2", timestamps, key="t2")
 
 # -------------------------------------------------
 # LAST REFRESH TIME (ONLY INFO SHOWN)
 # -------------------------------------------------
 if st.session_state.last_refresh:
     st.caption(
-        f"Last refreshed (UTC): "
+        "Last refreshed (UTC): "
         f"{st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}"
     )
