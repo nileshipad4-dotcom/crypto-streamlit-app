@@ -55,7 +55,17 @@ def get_ist_hhmm():
     return get_ist_datetime().strftime("%H:%M")
 
 def safe_ratio(a, b):
-    return a / b if b and not pd.isna(b) else None
+    try:
+        if b is None:
+            return None
+        if pd.isna(b):
+            return None
+        if float(b) == 0.0:
+            return None
+        return float(a) / float(b)
+    except Exception:
+        return None
+
 
 def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
