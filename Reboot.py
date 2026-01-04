@@ -1,9 +1,8 @@
-# crypto compare
+# crypto compare — GitHub CSV raw URLs (auto-updating timestamps)
 
 import streamlit as st
 import pandas as pd
 import requests
-import os
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
@@ -34,15 +33,29 @@ def rotated_time_sort(times, pivot="17:30"):
 def safe_ratio(a, b):
     return a / b if b and not pd.isna(b) else None
 
-def file_mtime(path):
-    return os.path.getmtime(path)
-
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 EXPIRY = "05-01-2026"
 ASSETS = ["BTC", "ETH"]
+
+BTC_CSV_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "refs/heads/main/data/BTC.csv"
+)
+
+ETH_CSV_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "refs/heads/main/data/ETH.csv"
+)
+
+CSV_URLS = {
+    "BTC": BTC_CSV_URL,
+    "ETH": ETH_CSV_URL,
+}
 
 STRIKE_COL_IDX = 6
 TIMESTAMP_COL_IDX = 14
@@ -75,20 +88,15 @@ c1.metric("BTC Price", f"{int(prices['BTC']):,}" if prices["BTC"] else "Error")
 c2.metric("ETH Price", f"{int(prices['ETH']):,}" if prices["ETH"] else "Error")
 
 # -------------------------------------------------
-# TIMESTAMPS — FILE CHANGE AWARE (KEY FIX)
+# LOAD TIMESTAMPS
 # -------------------------------------------------
-@st.cache_data
-def load_timestamps(csv_path, mtime):
-    df_ts = pd.read_csv(csv_path)
+@st.cache_data(ttl=60)
+def load_timestamps(csv_url):
+    df_ts = pd.read_csv(csv_url)
     df_ts["timestamp"] = df_ts.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
     return rotated_time_sort(df_ts["timestamp"].unique())
 
-BTC_CSV = "data/BTC.csv"
-
-timestamps = load_timestamps(
-    BTC_CSV,
-    file_mtime(BTC_CSV)   # 🔥 cache invalidates when CSV updates
-)
+timestamps = load_timestamps(BTC_CSV_URL)
 
 t1 = st.selectbox(
     "Time 1 (Latest)",
@@ -114,7 +122,7 @@ pcr_rows = []
 # =================================================
 for UNDERLYING in ASSETS:
 
-    df_raw = pd.read_csv(f"data/{UNDERLYING}.csv")
+    df_raw = pd.read_csv(CSV_URLS[UNDERLYING])
 
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
@@ -163,7 +171,7 @@ for UNDERLYING in ASSETS:
 
     pcr_live_vol = safe_ratio(
         df_live.loc[df_live["contract_type"] == "put_options", "volume"].sum(),
-        df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum(),
+        df_live.loc[df_live["contract_type"] == "call_options", "volume"].sum(),  
     )
 
     pcr_rows.append([
