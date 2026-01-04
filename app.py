@@ -3,10 +3,9 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta, date
 import calendar
-from Reboot import reboot_app
 
 # =================================================
-# PAGE CONFIG (MUST BE FIRST STREAMLIT CALL)
+# PAGE CONFIG — MUST BE FIRST
 # =================================================
 st.set_page_config(
     page_title="Crypto Option Chain — Max Pain",
@@ -15,20 +14,26 @@ st.set_page_config(
 )
 
 # =================================================
-# SIDEBAR — APP CONTROL
+# SAFE HARD REBOOT MECHANISM
+# =================================================
+if "do_reboot" not in st.session_state:
+    st.session_state.do_reboot = False
+
+# 🔥 perform reboot ONLY at top of next run
+if st.session_state.do_reboot:
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.session_state.clear()
+    st.rerun()
+
+# =================================================
+# SIDEBAR CONTROL
 # =================================================
 st.sidebar.markdown("### ⚙️ App Control")
 
-if "confirm_reboot" not in st.session_state:
-    st.session_state.confirm_reboot = False
-
 if st.sidebar.button("🔄 HARD REBOOT APP"):
-    st.session_state.confirm_reboot = True
-
-if st.session_state.confirm_reboot:
-    st.sidebar.warning("Click again to confirm reboot")
-    if st.sidebar.button("✅ CONFIRM REBOOT"):
-        reboot_app()
+    st.session_state.do_reboot = True
+    st.rerun()
 
 # =================================================
 # CONFIG
@@ -67,20 +72,11 @@ def get_expiries():
     if d >= latest_valid:
         expiries.add(d)
 
-    year, month = today.year, today.month
-    for week in calendar.monthcalendar(year, month):
+    for week in calendar.monthcalendar(today.year, today.month):
         if week[calendar.FRIDAY]:
-            fd = date(year, month, week[calendar.FRIDAY])
+            fd = date(today.year, today.month, week[calendar.FRIDAY])
             if fd >= latest_valid:
                 expiries.add(fd)
-
-    for i in (1, 2):
-        m = month + i
-        y = year + (m - 1) // 12
-        m = ((m - 1) % 12) + 1
-        cal = calendar.monthcalendar(y, m)
-        last_friday = max(w[calendar.FRIDAY] for w in cal if w[calendar.FRIDAY])
-        expiries.add(date(y, m, last_friday))
 
     return sorted(
         [d.strftime("%d-%m-%Y") for d in expiries],
@@ -94,8 +90,7 @@ def get_expiries():
 def get_delta_price(symbol):
     try:
         r = requests.get(API_BASE, timeout=10).json()["result"]
-        sym = f"{symbol}USD"
-        return float(next(x for x in r if x["symbol"] == sym)["mark_price"])
+        return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
     except:
         return None
 
@@ -118,41 +113,39 @@ def fetch_tickers(underlying, expiry):
 # FORMAT CHAIN
 # =================================================
 def format_option_chain(df_raw):
-    cols = ["strike_price", "contract_type", "mark_price", "oi_contracts"]
-    for c in cols:
-        if c not in df_raw.columns:
-            df_raw[c] = 0
+    df = df_raw[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
+    df[["strike_price", "mark_price", "oi_contracts"]] = df[
+        ["strike_price", "mark_price", "oi_contracts"]
+    ].apply(pd.to_numeric, errors="coerce").fillna(0)
 
-    df = df_raw[cols].copy()
-    for c in ["strike_price", "mark_price", "oi_contracts"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-
-    calls = df[df["contract_type"] == "call_options"].rename(
+    calls = df[df.contract_type == "call_options"].rename(
         columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}
-    ).drop(columns="contract_type")
-
-    puts = df[df["contract_type"] == "put_options"].rename(
+    )
+    puts = df[df.contract_type == "put_options"].rename(
         columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}
-    ).drop(columns="contract_type")
+    )
 
-    return pd.merge(calls, puts, on="strike_price", how="outer").fillna(0)
+    return pd.merge(
+        calls[["strike_price", "call_mark", "call_oi"]],
+        puts[["strike_price", "put_mark", "put_oi"]],
+        on="strike_price",
+        how="outer"
+    ).fillna(0)
 
 # =================================================
 # MAX PAIN
 # =================================================
 def compute_max_pain(df):
-    A, B = df["call_mark"].values, df["call_oi"].values
-    G = df["strike_price"].values
-    L, M = df["put_oi"].values, df["put_mark"].values
-
     mp = []
     for i in range(len(df)):
         mp.append(
             (
-                -sum(A[i:] * B[i:])
-                + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-                - sum(M[:i] * L[:i])
-                + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+                -sum(df.call_mark[i:] * df.call_oi[i:])
+                + df.strike_price[i] * sum(df.call_oi[:i])
+                - sum(df.strike_price[:i] * df.call_oi[:i])
+                - sum(df.put_mark[:i] * df.put_oi[:i])
+                + sum(df.strike_price[i:] * df.put_oi[i:])
+                - df.strike_price[i] * sum(df.put_oi[i:])
             ) / 10000
         )
     df["max_pain"] = mp
@@ -163,56 +156,26 @@ def compute_max_pain(df):
 # =================================================
 st.title("📈 Crypto Option Chain — Max Pain")
 
-selected_underlying = st.sidebar.selectbox("Underlying", UNDERLYINGS)
-selected_expiry = st.sidebar.selectbox("Expiry", get_expiries())
+u = st.sidebar.selectbox("Underlying", UNDERLYINGS)
+e = st.sidebar.selectbox("Expiry", get_expiries())
 
-auto_refresh = st.sidebar.checkbox("Auto-refresh", True)
-
-spot = get_delta_price(selected_underlying)
-st.sidebar.metric(
-    f"{selected_underlying} Spot",
-    f"{spot:,.0f}" if spot else "Error"
-)
-st.sidebar.caption(f"IST Time: {get_ist_time()}")
-
-if auto_refresh:
-    try:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=REFRESH_SECONDS * 1000, key="refresh")
-    except:
-        pass
+spot = get_delta_price(u)
+st.sidebar.metric(f"{u} Spot", f"{spot:,.0f}" if spot else "Error")
+st.sidebar.caption(f"IST {get_ist_time()}")
 
 # =================================================
 # PROCESS
 # =================================================
-raw = fetch_tickers(selected_underlying, selected_expiry)
-df = compute_max_pain(format_option_chain(raw))
+df = compute_max_pain(format_option_chain(fetch_tickers(u, e)))
 df = df.sort_values("strike_price").reset_index(drop=True)
-df["Δ max_pain"] = df["max_pain"].diff()
+df["Δ max_pain"] = df.max_pain.diff()
 
 df_final = df[["strike_price", "max_pain", "Δ max_pain"]].round(0).astype("Int64")
 
 # =================================================
-# HIGHLIGHTS
-# =================================================
-mp_strike = df_final.loc[df_final["max_pain"].idxmin(), "strike_price"]
-low = df_final[df_final["strike_price"] <= spot]["strike_price"].max()
-high = df_final[df_final["strike_price"] >= spot]["strike_price"].min()
-
-def highlight(row):
-    if row["strike_price"] == mp_strike:
-        return ["background-color:#960018"] * len(row)
-    if row["strike_price"] in (low, high):
-        return ["background-color:#4B0082"] * len(row)
-    return [""] * len(row)
-
-# =================================================
 # DISPLAY
 # =================================================
-st.subheader(f"{selected_underlying} — Expiry {selected_expiry}")
-st.caption("Indigo = Spot band | Red = Max Pain | HARD REBOOT clears cache + state")
+st.subheader(f"{u} — Expiry {e}")
+st.caption("🔄 HARD REBOOT clears cache + state safely")
 
-st.dataframe(
-    df_final.style.apply(highlight, axis=1),
-    use_container_width=True
-)
+st.dataframe(df_final, use_container_width=True)
