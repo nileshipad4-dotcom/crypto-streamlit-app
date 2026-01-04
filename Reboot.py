@@ -9,7 +9,7 @@ import time
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("🧪 CSV Real-Time Debugger (Hard Reload, No Cache)")
+st.title("🧪 CSV Real-Time Debugger (Correct Streamlit Model)")
 
 # -------------------------------------------------
 # HELPERS
@@ -17,26 +17,21 @@ st.title("🧪 CSV Real-Time Debugger (Hard Reload, No Cache)")
 def get_ist_datetime():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-def hard_reset_state():
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-
 def fetch_csv_strong_no_cache(url: str) -> pd.DataFrame:
     cache_buster = int(time.time() * 1000)
     url = f"{url}?cb={cache_buster}"
 
-    with requests.Session() as session:
-        r = session.get(
-            url,
-            headers={
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
-        return pd.read_csv(StringIO(r.text))
+    r = requests.get(
+        url,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    return pd.read_csv(StringIO(r.text))
 
 def extract_timestamps(df, col_idx=14):
     return (
@@ -49,8 +44,8 @@ def extract_timestamps(df, col_idx=14):
     )
 
 def find_matching_timestamp(timestamps, now_dt):
-    ts_set = set(timestamps)
     probe = now_dt.replace(second=0, microsecond=0)
+    ts_set = set(timestamps)
 
     for i in range(180):
         s = probe.strftime("%H:%M")
@@ -61,6 +56,15 @@ def find_matching_timestamp(timestamps, now_dt):
     return None, None
 
 # -------------------------------------------------
+# SESSION STATE INIT
+# -------------------------------------------------
+if "df" not in st.session_state:
+    st.session_state.df = None
+
+if "last_fetch" not in st.session_state:
+    st.session_state.last_fetch = None
+
+# -------------------------------------------------
 # INPUT UI
 # -------------------------------------------------
 st.subheader("🔗 Paste CSV RAW URL")
@@ -68,49 +72,47 @@ st.subheader("🔗 Paste CSV RAW URL")
 csv_url = st.text_input(
     "CSV Raw URL",
     placeholder="https://raw.githubusercontent.com/.../BTC.csv",
-    key="csv_url",
 )
 
-fetch_btn = st.button("🔄 Fetch CSV NOW (Hard Reload)")
+fetch_btn = st.button("🔄 Fetch CSV NOW (Fresh Load)")
 
 # -------------------------------------------------
-# HARD RESET + RERUN
+# FETCH (ONLY WHEN BUTTON IS PRESSED)
 # -------------------------------------------------
 if fetch_btn:
-    hard_reset_state()
-    st.rerun()
-
-# -------------------------------------------------
-# FETCH + DISPLAY
-# -------------------------------------------------
-if csv_url:
     try:
         df = fetch_csv_strong_no_cache(csv_url)
-
-        st.success("✅ CSV fetched successfully (fresh load, no cache)")
-
-        now_ist = get_ist_datetime()
-        st.write("🕒 Current IST:", now_ist.strftime("%Y-%m-%d %H:%M:%S"))
-        st.write("📦 Rows in CSV:", len(df))
-        st.write("📦 Columns in CSV:", list(df.columns))
-
-        timestamps = extract_timestamps(df)
-        st.write("⏱ Last 10 unique timestamps:", sorted(timestamps)[-10:])
-
-        t1, back_minutes = find_matching_timestamp(timestamps, now_ist)
-
-        if t1:
-            st.success(
-                f"🎯 Matching timestamp found: {t1} "
-                f"(matched {back_minutes} minute(s) back)"
-            )
-        else:
-            st.error("❌ No timestamp matches current IST")
-
-        st.subheader("📄 CSV Preview — LAST 50 ROWS")
-        st.dataframe(df.tail(50), use_container_width=True)
+        st.session_state.df = df
+        st.session_state.last_fetch = datetime.utcnow()
+        st.success("✅ CSV fetched fresh from source")
 
     except Exception as e:
-        st.error(f"❌ Failed to fetch or parse CSV: {e}")
+        st.error(f"❌ Fetch failed: {e}")
+
+# -------------------------------------------------
+# DISPLAY (USES SESSION STATE)
+# -------------------------------------------------
+if st.session_state.df is not None:
+    df = st.session_state.df
+
+    now_ist = get_ist_datetime()
+    st.write("🕒 Current IST:", now_ist.strftime("%Y-%m-%d %H:%M:%S"))
+    st.write("🕒 Last Fetch UTC:", st.session_state.last_fetch)
+    st.write("📦 Rows:", len(df))
+    st.write("📦 Columns:", list(df.columns))
+
+    timestamps = extract_timestamps(df)
+    st.write("⏱ Last 10 timestamps:", sorted(timestamps)[-10:])
+
+    t1, back_minutes = find_matching_timestamp(timestamps, now_ist)
+
+    if t1:
+        st.success(f"🎯 Matching timestamp: {t1} ({back_minutes} min back)")
+    else:
+        st.error("❌ No timestamp match found")
+
+    st.subheader("📄 CSV Preview — LAST 50 ROWS")
+    st.dataframe(df.tail(50), use_container_width=True)
+
 else:
-    st.info("Paste a CSV RAW URL and click **Fetch CSV NOW**")
+    st.info("Click **Fetch CSV NOW** to load data")
