@@ -1,4 +1,4 @@
-# crypto compare — FINAL COMPLETE VERSION (EXPIRY + MP + PCR FIXED)
+# crypto compare — FINAL COMPLETE VERSION (EXPIRY + MP + PCR + OI/VOLUME DELTAS)
 
 import streamlit as st
 import pandas as pd
@@ -42,8 +42,11 @@ PIVOT_TIME = "17:30"
 STRIKE_COL_IDX = 6
 TIMESTAMP_COL_IDX = 14
 VALUE_COL_IDX = 19
+
 CALL_OI_COL_IDX = 1
+CALL_VOL_COL_IDX = 2
 PUT_OI_COL_IDX = 11
+PUT_VOL_COL_IDX = 12
 
 # -------------------------------------------------
 # HELPERS
@@ -56,16 +59,11 @@ def get_ist_hhmm():
 
 def safe_ratio(a, b):
     try:
-        if b is None:
-            return None
-        if pd.isna(b):
-            return None
-        if float(b) == 0.0:
+        if b is None or pd.isna(b) or float(b) == 0:
             return None
         return float(a) / float(b)
     except Exception:
         return None
-
 
 def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
@@ -73,9 +71,9 @@ def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
     pivot_m = int(pivot[:2]) * 60 + int(pivot[3:])
     return sorted(times, key=lambda t: (pivot_m - (int(t[:2])*60 + int(t[3:]))) % 1440)
 
-# -------------------
-# ✅ FINAL EXPIRY LOGIC (NO EXPIRED, NO LEAKS)
-# -------------------
+# -------------------------------------------------
+# EXPIRY LOGIC (UNCHANGED)
+# -------------------------------------------------
 def get_expiries():
     ist_now = get_ist_datetime()
     today = ist_now.date()
@@ -116,7 +114,7 @@ def get_expiries():
     )
 
 # -------------------------------------------------
-# ⏱ TIMESTAMP + EXPIRY CONTROLS
+# CONTROLS
 # -------------------------------------------------
 if "ts_asset" not in st.session_state:
     st.session_state.ts_asset = "ETH"
@@ -129,13 +127,17 @@ with c1:
     st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
 with c2:
     if st.button("⏱"):
-        st.session_state.timestamps = extract_fresh_timestamps_from_github(st.session_state.ts_asset)
+        st.session_state.timestamps = extract_fresh_timestamps_from_github(
+            st.session_state.ts_asset
+        )
 with c3:
     expiry_list = get_expiries()
     selected_expiry = st.selectbox("Expiry", expiry_list)
 
 if not st.session_state.timestamps:
-    st.session_state.timestamps = extract_fresh_timestamps_from_github(st.session_state.ts_asset)
+    st.session_state.timestamps = extract_fresh_timestamps_from_github(
+        st.session_state.ts_asset
+    )
 
 timestamps = st.session_state.timestamps
 t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
@@ -172,9 +174,12 @@ for UNDERLYING in ASSETS:
         "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
         "call_oi": pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
         "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
+        "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
+        "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
         "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
     }).dropna()
 
+    # ---------- MP SNAPSHOTS ----------
     df_t1 = df[df["timestamp"] == t1].groupby("strike_price")["value"].sum()
     df_t2 = df[df["timestamp"] == t2].groupby("strike_price")["value"].sum()
 
@@ -182,6 +187,7 @@ for UNDERLYING in ASSETS:
     merged.columns = [f"MP ({t1})", f"MP ({t2})"]
     merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
 
+    # ---------- LIVE MP ----------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -222,7 +228,29 @@ for UNDERLYING in ASSETS:
     now_ts = get_ist_hhmm()
     live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
-    final = merged.merge(live_mp, on="strike_price", how="left")
+    # ---------- OI & VOLUME DELTAS ----------
+    agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
+        ["call_oi", "put_oi", "call_vol", "put_vol"]
+    ].sum()
+
+    agg_t2 = df[df["timestamp"] == t2].groupby("strike_price")[
+        ["call_oi", "put_oi", "call_vol", "put_vol"]
+    ].sum()
+
+    delta_oi_vol = (agg_t1 - agg_t2).rename(columns={
+        "call_oi": "Δ Call OI",
+        "put_oi": "Δ Put OI",
+        "call_vol": "Δ Call Volume",
+        "put_vol": "Δ Put Volume",
+    })
+
+    # ---------- FINAL MERGE (NOTHING REMOVED) ----------
+    final = (
+        merged
+        .merge(live_mp, on="strike_price", how="left")
+        .merge(delta_oi_vol, on="strike_price", how="left")
+    )
+
     final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
     final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
 
@@ -235,9 +263,14 @@ for UNDERLYING in ASSETS:
             "△ MP 1",
             "△ MP 2",
             "ΔΔ MP 1",
+            "Δ Call OI",
+            "Δ Put OI",
+            "Δ Call Volume",
+            "Δ Put Volume",
         ]
     ].round(0).astype("Int64").reset_index(drop=True)
 
+    # ---------- HIGHLIGHTING (UNCHANGED) ----------
     atm = prices[UNDERLYING]
     strikes = final["strike_price"].astype(float).tolist()
     atm_low = max([s for s in strikes if s <= atm], default=None)
@@ -254,6 +287,7 @@ for UNDERLYING in ASSETS:
     st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
     st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True)
 
+    # ---------- PCR ----------
     pcr_rows.append([
         UNDERLYING,
         safe_ratio(
