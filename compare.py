@@ -46,7 +46,7 @@ VALUE_COL_IDX = 19
 CALL_OI_COL_IDX = 1
 CALL_VOL_COL_IDX = 2
 PUT_OI_COL_IDX = 11
-PUT_VOL_COL_IDX = 12
+PUT_VOL_COL_IDX = 10
 
 # -------------------------------------------------
 # HELPERS
@@ -314,3 +314,4 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
