@@ -6,7 +6,7 @@ import os
 
 headers = {"Accept": "application/json"}
 
-EXPIRIES = ["11-01-2026"]
+EXPIRIES = ["12-01-2026"]
 UNDERLYINGS = ["BTC", "ETH"]
 
 API_DELTA = "https://api.india.delta.exchange/v2/tickers"
