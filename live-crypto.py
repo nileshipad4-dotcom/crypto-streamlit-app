@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import calendar
+import os
 from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
 
@@ -167,7 +168,14 @@ pcr_rows = []
 # =================================================
 for UNDERLYING in ASSETS:
 
-    df_raw = pd.read_csv(f"data/{UNDERLYING}.csv")
+    file_path = f"data/{UNDERLYING}_{selected_expiry}.csv"
+
+    if not os.path.exists(file_path):
+        st.warning(f"No data file found for {UNDERLYING} {selected_expiry}")
+        continue
+
+    df_raw = pd.read_csv(file_path)
+
 
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
