@@ -211,7 +211,6 @@ for UNDERLYING in ASSETS:
     )
 
     # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
-    # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
     
     df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
@@ -223,13 +222,34 @@ for UNDERLYING in ASSETS:
             "oi_contracts": "sum",
             "volume": "sum"
         })
-        .unstack()
-        .fillna(0)
+        .reset_index()
     )
     
-    # Convert live snapshot to flat table
-    live_agg = live_agg.reset_index()
+    # Split calls and puts
+    calls_live = live_agg[live_agg["contract_type"] == "call_options"][
+        ["strike_price", "oi_contracts", "volume"]
+    ].rename(columns={
+        "oi_contracts": "Call OI",
+        "volume": "Call Volume"
+    })
+    
+    puts_live = live_agg[live_agg["contract_type"] == "put_options"][
+        ["strike_price", "oi_contracts", "volume"]
+    ].rename(columns={
+        "oi_contracts": "Put OI",
+        "volume": "Put Volume"
+    })
+    
+    # Merge calls + puts into flat table
+    live_agg = pd.merge(
+        calls_live,
+        puts_live,
+        on="strike_price",
+        how="outer"
+    ).fillna(0)
+    
     live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
+
     
     # Build CSV snapshot at T1
     agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
