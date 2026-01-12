@@ -1,31 +1,90 @@
-# collector.py
+# collector.py (AUTO EXPIRY VERSION)
+
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+import calendar
 import os
 
 headers = {"Accept": "application/json"}
 
-EXPIRIES = ["13-01-2026"]
 UNDERLYINGS = ["BTC", "ETH"]
-
 API_DELTA = "https://api.india.delta.exchange/v2/tickers"
 
+
+# -------------------------------------------------
+# IST TIME HELPERS
+# -------------------------------------------------
+def get_ist_datetime():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+def get_ist_time_HHMM():
+    return get_ist_datetime().strftime("%H:%M")
+
+
+# -------------------------------------------------
+# EXPIRY LOGIC (SAME AS CODE 1)
+# -------------------------------------------------
+def get_expiries():
+    ist_now = get_ist_datetime()
+    today = ist_now.date()
+
+    if ist_now.time() <= datetime.strptime("17:30", "%H:%M").time():
+        latest_valid = today
+    else:
+        latest_valid = today + timedelta(days=1)
+
+    expiries = set()
+    expiries.add(latest_valid)
+
+    d = today
+    while d.weekday() != calendar.FRIDAY:
+        d += timedelta(days=1)
+    if d >= latest_valid:
+        expiries.add(d)
+
+    year, month = today.year, today.month
+    cal = calendar.monthcalendar(year, month)
+    for week in cal:
+        if week[calendar.FRIDAY] != 0:
+            fd = date(year, month, week[calendar.FRIDAY])
+            if fd >= latest_valid:
+                expiries.add(fd)
+
+    for i in [1, 2]:
+        m = month + i
+        y = year + (m - 1) // 12
+        m = ((m - 1) % 12) + 1
+        cal = calendar.monthcalendar(y, m)
+        lf = max(week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0)
+        expiries.add(date(y, m, lf))
+
+    return sorted(
+        [d.strftime("%d-%m-%Y") for d in expiries],
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
+    )
+
+
+# -------------------------------------------------
+# DATA FETCH
+# -------------------------------------------------
 def safe_to_numeric(val):
     try:
         return pd.to_numeric(val)
     except:
         return val
 
+
 def fetch_single_expiry(underlying, expiry_date):
 
     url = (
-        "https://api.india.delta.exchange/v2/tickers"
+        f"{API_DELTA}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={underlying}"
         f"&expiry_date={expiry_date}"
     )
-    r = requests.get(url, headers=headers)
+
+    r = requests.get(url, headers=headers, timeout=20)
     if r.status_code != 200:
         return pd.DataFrame()
 
@@ -86,15 +145,13 @@ def fetch_single_expiry(underlying, expiry_date):
 
     merged["Expiry"] = expiry_date
     merged = merged.sort_values("strike_price").reset_index(drop=True)
+
     return merged
 
 
-def get_ist_time_HHMM():
-    utc_now = datetime.utcnow()
-    ist_now = utc_now + timedelta(hours=5, minutes=30)
-    return ist_now.strftime("%H:%M")
-
-
+# -------------------------------------------------
+# MAX PAIN
+# -------------------------------------------------
 def compute_max_pain(df):
 
     A = df["call_mark"].fillna(0).values
@@ -104,60 +161,44 @@ def compute_max_pain(df):
     M = df["put_mark"].fillna(0).values
 
     n = len(df)
-
-    Q = []
-    R = []
-    S = []
-    T = []
     U = []
 
     for i in range(n):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        U.append(round((q + r + s + t) / 10000))
 
-        # Q = -SUMPRODUCT(A[i:], B[i:])
-        q_val = -sum(A[i:] * B[i:])
-        Q.append(q_val)
-
-        # R = (G[i] * SUM(B[:i])) - SUMPRODUCT(G[:i], B[:i])
-        r_val = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-        R.append(r_val)
-
-        # S = -SUMPRODUCT(M[:i], L[:i])
-        s_val = -sum(M[:i] * L[:i])
-        S.append(s_val)
-
-        # T = SUMPRODUCT(G[i:], L[i:]) - G[i] * SUM(L[i:])
-        t_val = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-        T.append(t_val)
-
-        # U = ROUND((Q + R + S + T) / 10000)
-        U.append(round((q_val + r_val + s_val + t_val) / 10000))
-
-    df["Q_call_cost"] = Q
-    df["R_call_intrinsic"] = R
-    df["S_put_cost"] = S
-    df["T_put_intrinsic"] = T
     df["max_pain"] = U
-
     return df
 
 
+# -------------------------------------------------
+# MAIN
+# -------------------------------------------------
 def main():
 
     ts = get_ist_time_HHMM()
     os.makedirs("data", exist_ok=True)
 
+    expiries = get_expiries()
+    selected_expiry = expiries[0]   # Nearest valid expiry
+
+    print(f"Using Expiry: {selected_expiry}")
+
     for underlying in UNDERLYINGS:
 
-        df = fetch_single_expiry(underlying, EXPIRIES[0])
+        df = fetch_single_expiry(underlying, selected_expiry)
         if df.empty:
+            print(f"No data for {underlying} {selected_expiry}")
             continue
 
         df["timestamp_IST"] = ts
-
-        # calculate max pain for THIS time group
         df = compute_max_pain(df)
 
-        out_path = f"data/{underlying}.csv"
+        # 🔴 EXPIRY-SPECIFIC FILE
+        out_path = f"data/{underlying}_{selected_expiry}.csv"
 
         df.to_csv(
             out_path,
@@ -166,16 +207,9 @@ def main():
             index=False
         )
 
-        print(f"Saved {underlying} data @ {ts}")
+        print(f"Saved {underlying} @ {ts} | Expiry {selected_expiry}")
+
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
