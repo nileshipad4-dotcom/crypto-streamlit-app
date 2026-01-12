@@ -227,8 +227,6 @@ for UNDERLYING in ASSETS:
         .fillna(0)
     )
     
-    live_agg.columns = ["Call OI", "Put OI", "Call Volume", "Put Volume"]
-
     # Convert live snapshot to flat table
     live_agg = live_agg.reset_index()
     live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
@@ -247,25 +245,23 @@ for UNDERLYING in ASSETS:
     
     csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
     
-    # Align both tables on strike_price
-    live_agg, csv_t1 = live_agg.align(csv_t1, on="strike_price", fill_value=0)
+    # Merge Live + CSV T1
+    merged_oi = pd.merge(
+        live_agg,
+        csv_t1,
+        on="strike_price",
+        how="outer",
+        suffixes=("_live", "_t1")
+    ).fillna(0)
     
-    # Calculate Live - T1 deltas
-    delta_live = live_agg.copy()
+    # Calculate Live - T1 Deltas
+    delta_live = pd.DataFrame()
+    delta_live["strike_price"] = merged_oi["strike_price"]
     
-    delta_live[["Δ Call OI", "Δ Put OI", "Δ Call Volume", "Δ Put Volume"]] = (
-        live_agg[["Call OI", "Put OI", "Call Volume", "Put Volume"]].values
-        - csv_t1[["Call OI", "Put OI", "Call Volume", "Put Volume"]].values
-    )
-    
-    delta_live = delta_live[[
-        "strike_price",
-        "Δ Call OI",
-        "Δ Put OI",
-        "Δ Call Volume",
-        "Δ Put Volume"
-    ]]
-
+    delta_live["Δ Call OI"] = merged_oi["Call OI_live"] - merged_oi["Call OI_t1"]
+    delta_live["Δ Put OI"] = merged_oi["Put OI_live"] - merged_oi["Put OI_t1"]
+    delta_live["Δ Call Volume"] = merged_oi["Call Volume_live"] - merged_oi["Call Volume_t1"]
+    delta_live["Δ Put Volume"] = merged_oi["Put Volume_live"] - merged_oi["Put Volume_t1"]
 
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
     for c in ["strike_price", "mark_price", "oi_contracts"]:
@@ -300,25 +296,7 @@ for UNDERLYING in ASSETS:
   
     # ---------- OI & VOLUME DELTAS (LATEST CSV - T1) ----------
     
-    # Use latest available CSV timestamp (not system time)
-    current_time = df["timestamp"].max()
-    
-    current_df = df[df["timestamp"] == current_time]
-    
-    agg_current = current_df.groupby("strike_price")[
-        ["call_oi", "put_oi", "call_vol", "put_vol"]
-    ].sum()
-    
-    agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
-        ["call_oi", "put_oi", "call_vol", "put_vol"]
-    ].sum()
-    
-    delta_oi_vol = (agg_current - agg_t1).rename(columns={
-        "call_oi": "Δ Call OI",
-        "put_oi": "Δ Put OI",
-        "call_vol": "Δ Call Volume",
-        "put_vol": "Δ Put Volume",
-    })
+
 
     # ---------- FINAL MERGE (NOTHING REMOVED) ----------
     final = (
