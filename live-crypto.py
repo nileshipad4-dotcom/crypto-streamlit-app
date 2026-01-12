@@ -205,6 +205,32 @@ for UNDERLYING in ASSETS:
         ).json()["result"]
     )
 
+    # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
+    live_agg = df_live.groupby(["strike_price", "contract_type"]).agg({
+        "oi_contracts": "sum",
+        "volume_24h": "sum"
+    }).unstack().fillna(0)
+    
+    live_agg.columns = ["Call OI", "Put OI", "Call Volume", "Put Volume"]
+
+    state_key = f"prev_live_{UNDERLYING}"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = live_agg.copy()
+    
+    delta_live = live_agg - st.session_state[state_key]
+    
+    delta_live = delta_live.rename(columns={
+        "Call OI": "Δ Call OI",
+        "Put OI": "Δ Put OI",
+        "Call Volume": "Δ Call Volume",
+        "Put Volume": "Δ Put Volume",
+    })
+    
+    st.session_state[state_key] = live_agg.copy()
+
+
+
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
     for c in ["strike_price", "mark_price", "oi_contracts"]:
         df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
@@ -262,7 +288,7 @@ for UNDERLYING in ASSETS:
     final = (
         merged
         .merge(live_mp, on="strike_price", how="left")
-        .merge(delta_oi_vol, on="strike_price", how="left")
+        .merge(delta_live, on="strike_price", how="left")
     )
 
     final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
