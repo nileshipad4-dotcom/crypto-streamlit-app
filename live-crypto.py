@@ -206,12 +206,24 @@ for UNDERLYING in ASSETS:
     )
 
     # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
-    live_agg = df_live.groupby(["strike_price", "contract_type"]).agg({
-        "oi_contracts": "sum",
-        "volume": "sum"
-    }).unstack().fillna(0)
+    # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
+    
+    df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
+    df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
+    
+    live_agg = (
+        df_live
+        .groupby(["strike_price", "contract_type"])
+        .agg({
+            "oi_contracts": "sum",
+            "volume": "sum"
+        })
+        .unstack()
+        .fillna(0)
+    )
     
     live_agg.columns = ["Call OI", "Put OI", "Call Volume", "Put Volume"]
+
 
     state_key = f"prev_live_{UNDERLYING}"
 
