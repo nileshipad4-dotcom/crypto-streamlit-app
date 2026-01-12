@@ -242,7 +242,8 @@ for UNDERLYING in ASSETS:
         "Call Volume": "Δ Call Volume",
         "Put Volume": "Δ Put Volume",
     })
-    
+    delta_live = delta_live.reset_index()
+
     # Update snapshot for next refresh
     st.session_state[state_key] = live_agg.copy()
 
