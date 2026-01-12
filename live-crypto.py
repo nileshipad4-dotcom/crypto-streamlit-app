@@ -194,6 +194,11 @@ for UNDERLYING in ASSETS:
     merged = pd.concat([df_t1, df_t2], axis=1)
     merged.columns = [f"MP ({t1})", f"MP ({t2})"]
     merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
+    
+    # ✅ Fix index → column + numeric type
+    merged = merged.reset_index()
+    merged["strike_price"] = pd.to_numeric(merged["strike_price"], errors="coerce")
+
 
     # ---------- LIVE MP ----------
     df_live = pd.json_normalize(
@@ -243,6 +248,7 @@ for UNDERLYING in ASSETS:
         "Put Volume": "Δ Put Volume",
     })
     delta_live = delta_live.reset_index()
+    delta_live["strike_price"] = pd.to_numeric(delta_live["strike_price"], errors="coerce")
 
     # Update snapshot for next refresh
     st.session_state[state_key] = live_agg.copy()
