@@ -208,7 +208,7 @@ for UNDERLYING in ASSETS:
     # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
     live_agg = df_live.groupby(["strike_price", "contract_type"]).agg({
         "oi_contracts": "sum",
-        "volume_24h": "sum"
+        "volume": "sum"
     }).unstack().fillna(0)
     
     live_agg.columns = ["Call OI", "Put OI", "Call Volume", "Put Volume"]
