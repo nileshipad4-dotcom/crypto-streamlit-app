@@ -227,23 +227,17 @@ for UNDERLYING in ASSETS:
     live_mp = compute_max_pain(mp)
     now_ts = get_ist_hhmm()
     live_mp.columns = ["strike_price", f"MP ({now_ts})"]
-  
-    # ---------- OI & VOLUME DELTAS (LATEST CSV - T1) ----------
-    
-    # Use latest available CSV timestamp (not system time)
-    current_time = df["timestamp"].max()
-    
-    current_df = df[df["timestamp"] == current_time]
-    
-    agg_current = current_df.groupby("strike_price")[
-        ["call_oi", "put_oi", "call_vol", "put_vol"]
-    ].sum()
-    
+
+    # ---------- OI & VOLUME DELTAS ----------
     agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
         ["call_oi", "put_oi", "call_vol", "put_vol"]
     ].sum()
-    
-    delta_oi_vol = (agg_current - agg_t1).rename(columns={
+
+    agg_t2 = df[df["timestamp"] == t2].groupby("strike_price")[
+        ["call_oi", "put_oi", "call_vol", "put_vol"]
+    ].sum()
+
+    delta_oi_vol = (agg_t1 - agg_t2).rename(columns={
         "call_oi": "Δ Call OI",
         "put_oi": "Δ Put OI",
         "call_vol": "Δ Call Volume",
