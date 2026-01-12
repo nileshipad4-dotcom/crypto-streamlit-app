@@ -226,11 +226,15 @@ for UNDERLYING in ASSETS:
 
 
     state_key = f"prev_live_{UNDERLYING}"
-
+    
     if state_key not in st.session_state:
         st.session_state[state_key] = live_agg.copy()
     
-    delta_live = live_agg - st.session_state[state_key]
+    # Align both DataFrames to avoid shape mismatch
+    prev = st.session_state[state_key]
+    live_agg, prev = live_agg.align(prev, fill_value=0)
+    
+    delta_live = live_agg - prev
     
     delta_live = delta_live.rename(columns={
         "Call OI": "Δ Call OI",
@@ -239,6 +243,7 @@ for UNDERLYING in ASSETS:
         "Put Volume": "Δ Put Volume",
     })
     
+    # Update snapshot for next refresh
     st.session_state[state_key] = live_agg.copy()
 
 
