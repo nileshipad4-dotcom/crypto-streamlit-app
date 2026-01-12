@@ -229,30 +229,42 @@ for UNDERLYING in ASSETS:
     
     live_agg.columns = ["Call OI", "Put OI", "Call Volume", "Put Volume"]
 
-
-    state_key = f"prev_live_{UNDERLYING}"
+    # Convert live snapshot to flat table
+    live_agg = live_agg.reset_index()
+    live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
     
-    if state_key not in st.session_state:
-        st.session_state[state_key] = live_agg.copy()
+    # Build CSV snapshot at T1
+    agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
+        ["call_oi", "put_oi", "call_vol", "put_vol"]
+    ].sum()
     
-    # Align both DataFrames to avoid shape mismatch
-    prev = st.session_state[state_key]
-    live_agg, prev = live_agg.align(prev, fill_value=0)
+    csv_t1 = agg_t1.rename(columns={
+        "call_oi": "Call OI",
+        "put_oi": "Put OI",
+        "call_vol": "Call Volume",
+        "put_vol": "Put Volume",
+    }).reset_index()
     
-    delta_live = live_agg - prev
+    csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
     
-    delta_live = delta_live.rename(columns={
-        "Call OI": "Δ Call OI",
-        "Put OI": "Δ Put OI",
-        "Call Volume": "Δ Call Volume",
-        "Put Volume": "Δ Put Volume",
-    })
-    delta_live = delta_live.reset_index()
-    delta_live["strike_price"] = pd.to_numeric(delta_live["strike_price"], errors="coerce")
-
-    # Update snapshot for next refresh
-    st.session_state[state_key] = live_agg.copy()
-
+    # Align both tables on strike_price
+    live_agg, csv_t1 = live_agg.align(csv_t1, on="strike_price", fill_value=0)
+    
+    # Calculate Live - T1 deltas
+    delta_live = live_agg.copy()
+    
+    delta_live[["Δ Call OI", "Δ Put OI", "Δ Call Volume", "Δ Put Volume"]] = (
+        live_agg[["Call OI", "Put OI", "Call Volume", "Put Volume"]].values
+        - csv_t1[["Call OI", "Put OI", "Call Volume", "Put Volume"]].values
+    )
+    
+    delta_live = delta_live[[
+        "strike_price",
+        "Δ Call OI",
+        "Δ Put OI",
+        "Δ Call Volume",
+        "Δ Put Volume"
+    ]]
 
 
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
