@@ -200,12 +200,15 @@ def main():
         # 🔴 EXPIRY-SPECIFIC FILE
         out_path = f"data/{underlying}_{selected_expiry}.csv"
 
+        file_exists = os.path.isfile(out_path) and os.path.getsize(out_path) > 0
+        
         df.to_csv(
             out_path,
             mode="a",
-            header=not os.path.exists(out_path),
+            header=not file_exists,
             index=False
         )
+
 
         print(f"Saved {underlying} @ {ts} | Expiry {selected_expiry}")
 
@@ -213,3 +216,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
