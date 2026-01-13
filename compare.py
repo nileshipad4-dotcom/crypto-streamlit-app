@@ -66,11 +66,14 @@ def safe_ratio(a, b):
     except Exception:
         return None
 
-def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
-    df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
-    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5].dropna().unique().tolist()
-    pivot_m = int(pivot[:2]) * 60 + int(pivot[3:])
-    return sorted(times, key=lambda t: (pivot_m - (int(t[:2])*60 + int(t[3:]))) % 1440)
+def extract_timestamps_from_local_csv(underlying, expiry):
+    file_path = f"data/{underlying}_{expiry}.csv"
+    if not os.path.exists(file_path):
+        return []
+
+    df = pd.read_csv(file_path)
+    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+    return sorted(times.dropna().unique(), reverse=True)
 
 # -------------------------------------------------
 # EXPIRY LOGIC (UNCHANGED)
@@ -114,6 +117,7 @@ def get_expiries():
         key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
     )
 
+
 # -------------------------------------------------
 # CONTROLS
 # -------------------------------------------------
@@ -124,23 +128,34 @@ if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
 
 c1, c2, c3 = st.columns([1, 6, 3])
+
 with c1:
     st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
-with c2:
-    if st.button("⏱"):
-        st.session_state.timestamps = extract_fresh_timestamps_from_github(
-            st.session_state.ts_asset
-        )
+
 with c3:
     expiry_list = get_expiries()
     selected_expiry = st.selectbox("Expiry", expiry_list)
 
+with c2:
+    if st.button("⏱"):
+        st.session_state.timestamps = extract_timestamps_from_local_csv(
+            st.session_state.ts_asset,
+            selected_expiry
+        )
+
+# Auto-load timestamps if empty
 if not st.session_state.timestamps:
-    st.session_state.timestamps = extract_fresh_timestamps_from_github(
-        st.session_state.ts_asset
+    st.session_state.timestamps = extract_timestamps_from_local_csv(
+        st.session_state.ts_asset,
+        selected_expiry
     )
 
 timestamps = st.session_state.timestamps
+
+if len(timestamps) < 2:
+    st.warning("Not enough timestamps in CSV.")
+    st.stop()
+
 t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
 
@@ -321,5 +336,6 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 
