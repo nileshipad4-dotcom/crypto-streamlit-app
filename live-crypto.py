@@ -214,6 +214,8 @@ for UNDERLYING in ASSETS:
         "call_vol": "Call Volume",
         "put_vol": "Put Volume",
     })
+    live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
+    csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
 
     # ---------- LIVE - T1 DELTA ----------
     merged_oi = pd.merge(
