@@ -1,4 +1,4 @@
-# crypto compare — FINAL COMPLETE VERSION (EXPIRY + MP + PCR + OI/VOLUME DELTAS)
+# crypto compare — FINAL COMPLETE VERSION (EXPIRY + MP + PCR + LIVE OI/VOLUME DELTAS)
 
 import streamlit as st
 import pandas as pd
@@ -15,39 +15,16 @@ st.set_page_config(layout="wide")
 st.title("📊 Strike-wise Comparison + Live Snapshot")
 
 # -------------------------------------------------
-# FORCE FRESH RUN TOKEN
-# -------------------------------------------------
-if "run_id" not in st.session_state:
-    st.session_state.run_id = 0
-
-# -------------------------------------------------
 # AUTO REFRESH (60s)
 # -------------------------------------------------
 if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
-    st.session_state.run_id += 1
 
 # -------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------
-BASE_RAW_URL = (
-    "https://raw.githubusercontent.com/"
-    "nileshipad4-dotcom/crypto-streamlit-app/"
-    "refs/heads/main/data/"
-)
-
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 ASSETS = ["BTC", "ETH"]
-PIVOT_TIME = "17:30"
-
-STRIKE_COL_IDX = 6
-TIMESTAMP_COL_IDX = 14
-VALUE_COL_IDX = 19
-
-CALL_OI_COL_IDX = 1
-CALL_VOL_COL_IDX = 2
-PUT_OI_COL_IDX = 11
-PUT_VOL_COL_IDX = 10
 
 # -------------------------------------------------
 # HELPERS
@@ -60,20 +37,32 @@ def get_ist_hhmm():
 
 def safe_ratio(a, b):
     try:
-        if b is None or pd.isna(b) or float(b) == 0:
+        if b == 0 or pd.isna(b):
             return None
         return float(a) / float(b)
-    except Exception:
+    except:
         return None
 
-def extract_fresh_timestamps_from_github(asset, pivot=PIVOT_TIME):
-    df = pd.read_csv(f"{BASE_RAW_URL}{asset}.csv")
-    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5].dropna().unique().tolist()
-    pivot_m = int(pivot[:2]) * 60 + int(pivot[3:])
-    return sorted(times, key=lambda t: (pivot_m - (int(t[:2])*60 + int(t[3:]))) % 1440)
+def extract_timestamps_from_local_csv(underlying, expiry):
+    file_path = f"data/{underlying}_{expiry}.csv"
+    if not os.path.exists(file_path):
+        return []
+
+    df = pd.read_csv(file_path)
+    if "timestamp_IST" not in df.columns:
+        return []
+
+    times = df["timestamp_IST"].astype(str).str[:5].dropna().unique()
+    pivot = 17 * 60 + 30  # 5:30 PM
+
+    def sort_key(t):
+        h, m = map(int, t.split(":"))
+        return (pivot - (h * 60 + m)) % 1440
+
+    return sorted(times, key=sort_key)
 
 # -------------------------------------------------
-# EXPIRY LOGIC (UNCHANGED)
+# EXPIRY LOGIC
 # -------------------------------------------------
 def get_expiries():
     ist_now = get_ist_datetime()
@@ -84,8 +73,7 @@ def get_expiries():
     else:
         latest_valid = today + timedelta(days=1)
 
-    expiries = set()
-    expiries.add(latest_valid)
+    expiries = {latest_valid}
 
     d = today
     while d.weekday() != calendar.FRIDAY:
@@ -106,41 +94,36 @@ def get_expiries():
         y = year + (m - 1) // 12
         m = ((m - 1) % 12) + 1
         cal = calendar.monthcalendar(y, m)
-        lf = max(week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY] != 0)
+        lf = max(w[calendar.FRIDAY] for w in cal if w[calendar.FRIDAY] != 0)
         expiries.add(date(y, m, lf))
 
-    return sorted(
-        [d.strftime("%d-%m-%Y") for d in expiries],
-        key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
-    )
+    return sorted([d.strftime("%d-%m-%Y") for d in expiries])
 
 # -------------------------------------------------
 # CONTROLS
 # -------------------------------------------------
-if "ts_asset" not in st.session_state:
-    st.session_state.ts_asset = "ETH"
-
-if "timestamps" not in st.session_state:
-    st.session_state.timestamps = []
-
 c1, c2, c3 = st.columns([1, 6, 3])
+
 with c1:
-    st.selectbox("", ASSETS, key="ts_asset", label_visibility="collapsed")
-with c2:
-    if st.button("⏱"):
-        st.session_state.timestamps = extract_fresh_timestamps_from_github(
-            st.session_state.ts_asset
-        )
+    asset = st.selectbox("", ASSETS)
+
 with c3:
     expiry_list = get_expiries()
     selected_expiry = st.selectbox("Expiry", expiry_list)
 
-if not st.session_state.timestamps:
-    st.session_state.timestamps = extract_fresh_timestamps_from_github(
-        st.session_state.ts_asset
-    )
+with c2:
+    if st.button("⏱ Load Timestamps"):
+        st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
+
+if "timestamps" not in st.session_state or not st.session_state.timestamps:
+    st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
 
 timestamps = st.session_state.timestamps
+
+if len(timestamps) < 2:
+    st.warning("Not enough timestamps in CSV.")
+    st.stop()
+
 t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
 
@@ -159,32 +142,27 @@ p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 
 # -------------------------------------------------
-# PCR COLLECTION
+# MAIN LOOP
 # -------------------------------------------------
 pcr_rows = []
 
-# =================================================
-# MAIN LOOP
-# =================================================
 for UNDERLYING in ASSETS:
 
     file_path = f"data/{UNDERLYING}_{selected_expiry}.csv"
-
     if not os.path.exists(file_path):
         st.warning(f"No data file found for {UNDERLYING} {selected_expiry}")
         continue
 
     df_raw = pd.read_csv(file_path)
 
-
     df = pd.DataFrame({
-        "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
-        "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
-        "call_oi": pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-        "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
-        "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
-        "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
+        "strike_price": pd.to_numeric(df_raw["strike_price"], errors="coerce"),
+        "value": pd.to_numeric(df_raw["max_pain"], errors="coerce"),
+        "call_oi": pd.to_numeric(df_raw["call_oi"], errors="coerce"),
+        "put_oi": pd.to_numeric(df_raw["put_oi"], errors="coerce"),
+        "call_vol": pd.to_numeric(df_raw["call_volume"], errors="coerce"),
+        "put_vol": pd.to_numeric(df_raw["put_volume"], errors="coerce"),
+        "timestamp": df_raw["timestamp_IST"].astype(str).str[:5],
     }).dropna()
 
     # ---------- MP SNAPSHOTS ----------
@@ -194,13 +172,9 @@ for UNDERLYING in ASSETS:
     merged = pd.concat([df_t1, df_t2], axis=1)
     merged.columns = [f"MP ({t1})", f"MP ({t2})"]
     merged["△ MP 2"] = merged.iloc[:, 0] - merged.iloc[:, 1]
-    
-    # ✅ Fix index → column + numeric type
     merged = merged.reset_index()
-    merged["strike_price"] = pd.to_numeric(merged["strike_price"], errors="coerce")
 
-
-    # ---------- LIVE MP ----------
+    # ---------- LIVE API ----------
     df_live = pd.json_normalize(
         requests.get(
             f"{API_BASE}?contract_types=call_options,put_options"
@@ -210,62 +184,38 @@ for UNDERLYING in ASSETS:
         ).json()["result"]
     )
 
-    # ---------- LIVE OI & VOLUME (REAL-TIME) ----------
-    
     df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
-    
+
     live_agg = (
-        df_live
-        .groupby(["strike_price", "contract_type"])
-        .agg({
-            "oi_contracts": "sum",
-            "volume": "sum"
-        })
+        df_live.groupby(["strike_price", "contract_type"])
+        .agg({"oi_contracts": "sum", "volume": "sum"})
         .reset_index()
     )
-    
-    # Split calls and puts
+
     calls_live = live_agg[live_agg["contract_type"] == "call_options"][
         ["strike_price", "oi_contracts", "volume"]
-    ].rename(columns={
-        "oi_contracts": "Call OI",
-        "volume": "Call Volume"
-    })
-    
+    ].rename(columns={"oi_contracts": "Call OI", "volume": "Call Volume"})
+
     puts_live = live_agg[live_agg["contract_type"] == "put_options"][
         ["strike_price", "oi_contracts", "volume"]
-    ].rename(columns={
-        "oi_contracts": "Put OI",
-        "volume": "Put Volume"
-    })
-    
-    # Merge calls + puts into flat table
-    live_agg = pd.merge(
-        calls_live,
-        puts_live,
-        on="strike_price",
-        how="outer"
-    ).fillna(0)
-    
-    live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
+    ].rename(columns={"oi_contracts": "Put OI", "volume": "Put Volume"})
 
-    
-    # Build CSV snapshot at T1
-    agg_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
+    live_agg = pd.merge(calls_live, puts_live, on="strike_price", how="outer").fillna(0)
+
+    # ---------- CSV T1 ----------
+    csv_t1 = df[df["timestamp"] == t1].groupby("strike_price")[
         ["call_oi", "put_oi", "call_vol", "put_vol"]
-    ].sum()
-    
-    csv_t1 = agg_t1.rename(columns={
+    ].sum().reset_index()
+
+    csv_t1 = csv_t1.rename(columns={
         "call_oi": "Call OI",
         "put_oi": "Put OI",
         "call_vol": "Call Volume",
         "put_vol": "Put Volume",
-    }).reset_index()
-    
-    csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
-    
-    # Merge Live + CSV T1
+    })
+
+    # ---------- LIVE - T1 DELTA ----------
     merged_oi = pd.merge(
         live_agg,
         csv_t1,
@@ -273,16 +223,16 @@ for UNDERLYING in ASSETS:
         how="outer",
         suffixes=("_live", "_t1")
     ).fillna(0)
-    
-    # Calculate Live - T1 Deltas
-    delta_live = pd.DataFrame()
-    delta_live["strike_price"] = merged_oi["strike_price"]
-    
-    delta_live["Δ Call OI"] = merged_oi["Call OI_live"] - merged_oi["Call OI_t1"]
-    delta_live["Δ Put OI"] = merged_oi["Put OI_live"] - merged_oi["Put OI_t1"]
-    delta_live["Δ Call Volume"] = merged_oi["Call Volume_live"] - merged_oi["Call Volume_t1"]
-    delta_live["Δ Put Volume"] = merged_oi["Put Volume_live"] - merged_oi["Put Volume_t1"]
 
+    delta_live = pd.DataFrame({
+        "strike_price": merged_oi["strike_price"],
+        "Δ Call OI": merged_oi["Call OI_live"] - merged_oi["Call OI_t1"],
+        "Δ Put OI": merged_oi["Put OI_live"] - merged_oi["Put OI_t1"],
+        "Δ Call Volume": merged_oi["Call Volume_live"] - merged_oi["Call Volume_t1"],
+        "Δ Put Volume": merged_oi["Put Volume_live"] - merged_oi["Put Volume_t1"],
+    })
+
+    # ---------- LIVE MAX PAIN ----------
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
     for c in ["strike_price", "mark_price", "oi_contracts"]:
         df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
@@ -302,10 +252,8 @@ for UNDERLYING in ASSETS:
         G = df["strike_price"]
         L, M = df["put_oi"].fillna(0), df["put_mark"].fillna(0)
         df["Current"] = [
-            (
-                -sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-                - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-            ) / 10000
+            (-sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+             - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])) / 10000
             for i in range(len(df))
         ]
         return df[["strike_price", "Current"]]
@@ -313,12 +261,8 @@ for UNDERLYING in ASSETS:
     live_mp = compute_max_pain(mp)
     now_ts = get_ist_hhmm()
     live_mp.columns = ["strike_price", f"MP ({now_ts})"]
-  
-    # ---------- OI & VOLUME DELTAS (LATEST CSV - T1) ----------
-    
 
-
-    # ---------- FINAL MERGE (NOTHING REMOVED) ----------
+    # ---------- FINAL MERGE ----------
     final = (
         merged
         .merge(live_mp, on="strike_price", how="left")
@@ -342,9 +286,9 @@ for UNDERLYING in ASSETS:
             "Δ Call Volume",
             "Δ Put Volume",
         ]
-    ].round(0).astype("Int64").reset_index(drop=True)
+    ].round(0).astype("Int64")
 
-    # ---------- HIGHLIGHTING (UNCHANGED) ----------
+    # ---------- HIGHLIGHTING ----------
     atm = prices[UNDERLYING]
     strikes = final["strike_price"].astype(float).tolist()
     atm_low = max([s for s in strikes if s <= atm], default=None)
