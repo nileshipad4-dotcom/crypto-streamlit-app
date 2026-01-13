@@ -4,6 +4,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 
+
+from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=10_000, key="btc_refresh")
+
 st.subheader("📈 BTC Live OHLC Chart")
 
 # -----------------------------
