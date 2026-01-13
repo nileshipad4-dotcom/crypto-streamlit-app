@@ -65,8 +65,13 @@ def extract_timestamps_from_local_csv(underlying, expiry):
         return []
 
     df = pd.read_csv(file_path)
-    times = df.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5]
+
+    if "timestamp_IST" not in df.columns:
+        return []
+
+    times = df["timestamp_IST"].astype(str).str[:5]
     return sorted(times.dropna().unique(), reverse=True)
+
 
 # -------------------------------------------------
 # EXPIRY LOGIC (UNCHANGED)
@@ -329,6 +334,7 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 
 
