@@ -69,8 +69,17 @@ def extract_timestamps_from_local_csv(underlying, expiry):
     if "timestamp_IST" not in df.columns:
         return []
 
-    times = df["timestamp_IST"].astype(str).str[:5]
-    return sorted(times.dropna().unique(), reverse=True)
+    times = df["timestamp_IST"].astype(str).str[:5].dropna().unique()
+
+    pivot = 17 * 60 + 30  # 5:30 PM in minutes
+
+    def sort_key(t):
+        h, m = map(int, t.split(":"))
+        minutes = h * 60 + m
+        return (pivot - minutes) % 1440  # wrap around 24h
+
+    return sorted(times, key=sort_key)
+
 
 
 # -------------------------------------------------
@@ -334,6 +343,7 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 
 
