@@ -40,14 +40,7 @@ API_BASE = "https://api.india.delta.exchange/v2/tickers"
 ASSETS = ["BTC", "ETH"]
 PIVOT_TIME = "17:30"
 
-STRIKE_COL_IDX = 6
-TIMESTAMP_COL_IDX = 14
-VALUE_COL_IDX = 19
 
-CALL_OI_COL_IDX = 1
-CALL_VOL_COL_IDX = 2
-PUT_OI_COL_IDX = 11
-PUT_VOL_COL_IDX = 10
 
 # -------------------------------------------------
 # HELPERS
@@ -192,13 +185,13 @@ for UNDERLYING in ASSETS:
     df_raw = pd.read_csv(file_path)
 
     df = pd.DataFrame({
-        "strike_price": pd.to_numeric(df_raw.iloc[:, STRIKE_COL_IDX], errors="coerce"),
-        "value": pd.to_numeric(df_raw.iloc[:, VALUE_COL_IDX], errors="coerce"),
-        "call_oi": pd.to_numeric(df_raw.iloc[:, CALL_OI_COL_IDX], errors="coerce"),
-        "put_oi": pd.to_numeric(df_raw.iloc[:, PUT_OI_COL_IDX], errors="coerce"),
-        "call_vol": pd.to_numeric(df_raw.iloc[:, CALL_VOL_COL_IDX], errors="coerce"),
-        "put_vol": pd.to_numeric(df_raw.iloc[:, PUT_VOL_COL_IDX], errors="coerce"),
-        "timestamp": df_raw.iloc[:, TIMESTAMP_COL_IDX].astype(str).str[:5],
+        "strike_price": pd.to_numeric(df_raw["strike_price"], errors="coerce"),
+        "value": pd.to_numeric(df_raw["max_pain"], errors="coerce"),
+        "call_oi": pd.to_numeric(df_raw["call_oi"], errors="coerce"),
+        "put_oi": pd.to_numeric(df_raw["put_oi"], errors="coerce"),
+        "call_vol": pd.to_numeric(df_raw["call_volume"], errors="coerce"),
+        "put_vol": pd.to_numeric(df_raw["put_volume"], errors="coerce"),
+        "timestamp": df_raw["timestamp_IST"].astype(str).str[:5],
     }).dropna()
 
     # ---------- MP SNAPSHOTS ----------
@@ -336,6 +329,7 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 
 
