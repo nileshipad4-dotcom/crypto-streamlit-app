@@ -141,6 +141,8 @@ prices = {a: get_delta_price(a) for a in ASSETS}
 p1, p2 = st.columns(2)
 p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
+if "ref_price" not in st.session_state:
+    st.session_state.ref_price = float(prices[asset])
 
 # ==========================================
 # OI Weighted Strike Range Settings
@@ -152,9 +154,12 @@ r1, r2 = st.columns([2, 1])
 with r1:
     ref_price = st.number_input(
         "Reference Price (Default = LTP)",
-        value=float(prices[asset]),
+        value=st.session_state.ref_price,
         step=100.0
     )
+
+    st.session_state.ref_price = ref_price
+
 
 with r2:
     pct_range = st.number_input(
