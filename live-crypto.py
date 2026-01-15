@@ -170,8 +170,11 @@ with r2:
 pcr_rows = []
 
 for UNDERLYING in ASSETS:
-    low = ref_price * (1 - pct_range / 100)
-    high = ref_price * (1 + pct_range / 100)
+
+    base_price = ref_price if asset == UNDERLYING else prices[UNDERLYING]
+    
+    low = base_price * (1 - pct_range / 100)
+    high = base_price * (1 + pct_range / 100)
 
     file_path = f"data/{UNDERLYING}_{selected_expiry}.csv"
     if not os.path.exists(file_path):
