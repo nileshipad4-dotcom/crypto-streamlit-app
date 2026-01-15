@@ -256,13 +256,37 @@ for UNDERLYING in ASSETS:
     csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
 
     # ---------- LIVE - T1 DELTA ----------
-    merged_oi = pd.merge(
-        live_agg,
-        csv_t1,
-        on="strike_price",
-        how="outer",
-        suffixes=("_new", "_old")
-    ).fillna(0)
+    if not csv_mode:
+        # LIVE vs T1
+        merged_oi = pd.merge(
+            live_agg,
+            csv_t1,
+            on="strike_price",
+            how="outer",
+            suffixes=("_new", "_old")
+        ).fillna(0)
+    
+    else:
+        # T1 vs T2
+        csv_t2 = df[df["timestamp"] == t2].groupby("strike_price")[
+            ["call_oi", "put_oi", "call_vol", "put_vol"]
+        ].sum().reset_index()
+    
+        csv_t2 = csv_t2.rename(columns={
+            "call_oi": "Call OI",
+            "put_oi": "Put OI",
+            "call_vol": "Call Volume",
+            "put_vol": "Put Volume",
+        })
+    
+        merged_oi = pd.merge(
+            csv_t1,
+            csv_t2,
+            on="strike_price",
+            how="outer",
+            suffixes=("_new", "_old")
+        ).fillna(0)
+
 
     delta_live = pd.DataFrame({
         "strike_price": merged_oi["strike_price"],
@@ -294,11 +318,6 @@ for UNDERLYING in ASSETS:
         now_ts = get_ist_hhmm()
         live_mp.columns = ["strike_price", f"MP ({now_ts})"]
     
-    else:
-        # CSV mode: use existing MP from T2
-        live_mp = df_t2.reset_index()
-        live_mp.columns = ["strike_price", f"MP ({t2})"]
-        now_ts = t2
 
 
     # ---------- FINAL MERGE ----------
