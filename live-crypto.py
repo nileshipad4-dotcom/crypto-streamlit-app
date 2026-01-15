@@ -169,6 +169,8 @@ with r2:
 # -------------------------------------------------
 pcr_rows = []
 
+summary_rows = []
+
 for UNDERLYING in ASSETS:
 
     base_price = ref_price if asset == UNDERLYING else prices[UNDERLYING]
@@ -385,17 +387,20 @@ for UNDERLYING in ASSETS:
     # Scaling factor based on asset
     scale = 100_000_000 if UNDERLYING == "BTC" else 1_000_000
     
-    s1, s2, s3 = st.columns(3)
+    summary_rows.append([
+        f"{UNDERLYING} OI × Strike",
+        int(call_sum / scale),
+        int(put_sum / scale),
+        int(diff_sum / scale),
+    ])
     
-    s1.metric("Σ Call OI × Strike", f"{int(call_sum / scale):,}")
-    s2.metric("Σ Put OI × Strike", f"{int(put_sum / scale):,}")
-    s3.metric("Put − Call", f"{int(diff_sum / scale):,}")
-    
-    d1, d2, d3 = st.columns(3)
-    
-    d1.metric("Σ Δ Call OI × Strike", f"{int(d_call_sum / scale):,}")
-    d2.metric("Σ Δ Put OI × Strike", f"{int(d_put_sum / scale):,}")
-    d3.metric("ΔPut − ΔCall", f"{int(d_diff / scale):,}")
+    summary_rows.append([
+        f"{UNDERLYING} ΔOI × Strike",
+        int(d_call_sum / scale),
+        int(d_put_sum / scale),
+        int(d_diff / scale),
+    ])
+
 
 
     st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
@@ -417,6 +422,20 @@ for UNDERLYING in ASSETS:
             df[df["timestamp"]==t2]["call_oi"].sum(),
         ),
     ])
+
+    st.subheader("📊 OI Weighted Summary (Compact View)")
+    
+    summary_df = pd.DataFrame(
+        summary_rows,
+        columns=[
+            "Type",
+            "Σ Call OI × Strike",
+            "Σ Put OI × Strike",
+            "Put − Call"
+        ]
+    )
+    
+    st.dataframe(summary_df, use_container_width=True)
 
 # -------------------------------------------------
 # PCR TABLE
