@@ -425,20 +425,20 @@ for UNDERLYING in ASSETS:
 
 
 
+st.subheader("📊 OI Weighted Summary (Compact View)")
 
-    st.subheader("📊 OI Weighted Summary (Compact View)")
-    
-    summary_df = pd.DataFrame(
-        summary_rows,
-        columns=[
-            "Type",
-            "Σ Call OI × Strike",
-            "Σ Put OI × Strike",
-            "Put − Call"
-        ]
-    )
-    
-    st.dataframe(summary_df, use_container_width=True)
+summary_df = pd.DataFrame(
+    summary_rows,
+    columns=[
+        "Type",
+        "Σ Call OI × Strike",
+        "Σ Put OI × Strike",
+        "Put − Call"
+    ]
+)
+
+st.dataframe(summary_df, use_container_width=True)
+
 
 # -------------------------------------------------
 # PCR TABLE
