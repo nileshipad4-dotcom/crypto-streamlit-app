@@ -285,7 +285,11 @@ for UNDERLYING in ASSETS:
         .merge(delta_live, on="strike_price", how="left")
     )
 
-    final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
+    if not csv_mode:
+        final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
+    else:
+        final["△ MP 1"] = final[f"MP ({t1})"] - final[f"MP ({t2})"]
+
     
     final = final[
         [
