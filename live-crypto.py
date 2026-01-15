@@ -61,31 +61,6 @@ def extract_timestamps_from_local_csv(underlying, expiry):
 
     return sorted(times, key=sort_key)
 
-
-def compute_max_pain(df):
-    A = df["call_mark"].fillna(0)
-    B = df["call_oi"].fillna(0)
-    G = df["strike_price"]
-    L = df["put_oi"].fillna(0)
-    M = df["put_mark"].fillna(0)
-
-    pain = []
-
-    for i in range(len(df)):
-        pain_value = (
-            -sum(A[i:] * B[i:]) +
-            G.iloc[i] * sum(B[:i]) -
-            sum(G[:i] * B[:i]) -
-            sum(M[:i] * L[:i]) +
-            sum(G[i:] * L[i:]) -
-            G.iloc[i] * sum(L[i:])
-        ) / 10000
-
-        pain.append(pain_value)
-
-    df["Current"] = pain
-    return df[["strike_price", "Current"]]
-
 # -------------------------------------------------
 # EXPIRY LOGIC
 # -------------------------------------------------
@@ -124,7 +99,6 @@ def get_expiries():
 
     return sorted([d.strftime("%d-%m-%Y") for d in expiries])
 
-
 # -------------------------------------------------
 # CONTROLS
 # -------------------------------------------------
@@ -135,14 +109,13 @@ with c1:
 
 with c3:
     expiry_list = get_expiries()
-    selected_expiry = st.selectbox("Expiry", expiry_list, key="expiry_select")
+    selected_expiry = st.selectbox("Expiry", expiry_list)
     csv_mode = st.toggle("📁 CSV Mode (T1 vs T2)", value=False)
 
 with c2:
     if st.button("⏱ Load Timestamps"):
         st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
 
-# ✅ AUTO-LOAD IF NOT PRESENT
 if "timestamps" not in st.session_state or not st.session_state.timestamps:
     st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
 
@@ -203,24 +176,14 @@ for UNDERLYING in ASSETS:
     merged = merged.reset_index()
 
     # ---------- LIVE API ----------
-    if not csv_mode:
-        df_live = pd.json_normalize(
-            requests.get(
-                f"{API_BASE}?contract_types=call_options,put_options"
-                f"&underlying_asset_symbols={UNDERLYING}"
-                f"&expiry_date={selected_expiry}",
-                timeout=20,
-            ).json()["result"]
-        )
-    else:
-        df_live = df[df["timestamp"] == t2].copy()
-        df_live["contract_type"] = df_live.apply(
-            lambda r: "call_options" if r["call_oi"] > 0 else "put_options",
-            axis=1
-        )
-        df_live["oi_contracts"] = df_live["call_oi"].fillna(0) + df_live["put_oi"].fillna(0)
-        df_live["volume"] = df_live["call_vol"].fillna(0) + df_live["put_vol"].fillna(0)
-
+    df_live = pd.json_normalize(
+        requests.get(
+            f"{API_BASE}?contract_types=call_options,put_options"
+            f"&underlying_asset_symbols={UNDERLYING}"
+            f"&expiry_date={selected_expiry}",
+            timeout=20,
+        ).json()["result"]
+    )
 
     df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
@@ -255,9 +218,10 @@ for UNDERLYING in ASSETS:
     live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
     csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
 
-    # ---------- LIVE - T1 DELTA ----------
+
+    # ---------- OI / VOLUME DELTA (TOGGLE CONTROLLED) ----------
     if not csv_mode:
-        # LIVE vs T1
+        # Live vs T1
         merged_oi = pd.merge(
             live_agg,
             csv_t1,
@@ -286,8 +250,7 @@ for UNDERLYING in ASSETS:
             how="outer",
             suffixes=("_new", "_old")
         ).fillna(0)
-
-
+    
     delta_live = pd.DataFrame({
         "strike_price": merged_oi["strike_price"],
         "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
@@ -296,29 +259,35 @@ for UNDERLYING in ASSETS:
         "Δ Put Volume": merged_oi["Put Volume_new"] - merged_oi["Put Volume_old"],
     })
 
+    # ---------- LIVE MAX PAIN ----------
+    df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
+    for c in ["strike_price", "mark_price", "oi_contracts"]:
+        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
 
+    calls = df_mp[df_mp["contract_type"] == "call_options"]
+    puts = df_mp[df_mp["contract_type"] == "put_options"]
 
-    # ---------- MAX PAIN ----------
-    if not csv_mode:
-        df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
-        for c in ["strike_price", "mark_price", "oi_contracts"]:
-            df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
-    
-        calls = df_mp[df_mp["contract_type"] == "call_options"]
-        puts = df_mp[df_mp["contract_type"] == "put_options"]
-    
-        mp = pd.merge(
-            calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-            puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
-            on="strike_price",
-            how="outer",
-        ).sort_values("strike_price")
-    
-        live_mp = compute_max_pain(mp)
-        now_ts = get_ist_hhmm()
-        live_mp.columns = ["strike_price", f"MP ({now_ts})"]
-    
+    mp = pd.merge(
+        calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+        puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+        on="strike_price",
+        how="outer",
+    ).sort_values("strike_price")
 
+    def compute_max_pain(df):
+        A, B = df["call_mark"].fillna(0), df["call_oi"].fillna(0)
+        G = df["strike_price"]
+        L, M = df["put_oi"].fillna(0), df["put_mark"].fillna(0)
+        df["Current"] = [
+            (-sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+             - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])) / 10000
+            for i in range(len(df))
+        ]
+        return df[["strike_price", "Current"]]
+
+    live_mp = compute_max_pain(mp)
+    now_ts = get_ist_hhmm()
+    live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
     # ---------- FINAL MERGE ----------
     final = (
@@ -327,12 +296,9 @@ for UNDERLYING in ASSETS:
         .merge(delta_live, on="strike_price", how="left")
     )
 
-    if not csv_mode:
-        final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
-    else:
-        final["△ MP 1"] = final[f"MP ({t1})"] - final[f"MP ({t2})"]
+    final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
+    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
 
-    
     final = final[
         [
             "strike_price",
@@ -341,6 +307,7 @@ for UNDERLYING in ASSETS:
             f"MP ({t2})",
             "△ MP 1",
             "△ MP 2",
+            "ΔΔ MP 1",
             "Δ Call OI",
             "Δ Put OI",
             "Δ Call Volume",
