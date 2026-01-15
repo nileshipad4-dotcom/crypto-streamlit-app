@@ -171,6 +171,9 @@ pcr_rows = []
 
 summary_rows = []
 
+# Placeholder for summary table (will render after data is collected)
+summary_placeholder = st.empty()
+
 for UNDERLYING in ASSETS:
 
     base_price = ref_price if asset == UNDERLYING else prices[UNDERLYING]
@@ -425,8 +428,6 @@ for UNDERLYING in ASSETS:
 
 
 
-st.subheader("📊 OI Weighted Summary (Compact View)")
-
 summary_df = pd.DataFrame(
     summary_rows,
     columns=[
@@ -437,7 +438,9 @@ summary_df = pd.DataFrame(
     ]
 )
 
-st.dataframe(summary_df, use_container_width=True)
+summary_placeholder.subheader("📊 OI Weighted Summary (Compact View)")
+summary_placeholder.dataframe(summary_df, use_container_width=True)
+
 
 
 # -------------------------------------------------
