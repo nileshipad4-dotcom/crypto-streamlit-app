@@ -297,7 +297,7 @@ for UNDERLYING in ASSETS:
     )
 
     final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
-    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
+ 
 
     final = final[
         [
@@ -307,7 +307,6 @@ for UNDERLYING in ASSETS:
             f"MP ({t2})",
             "△ MP 1",
             "△ MP 2",
-            "ΔΔ MP 1",
             "Δ Call OI",
             "Δ Put OI",
             "Δ Call Volume",
