@@ -250,35 +250,33 @@ for UNDERLYING in ASSETS:
     })
 
 
-    # ---------- LIVE MAX PAIN ----------
-    df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
-    for c in ["strike_price", "mark_price", "oi_contracts"]:
-        df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
 
-    calls = df_mp[df_mp["contract_type"] == "call_options"]
-    puts = df_mp[df_mp["contract_type"] == "put_options"]
+    # ---------- MAX PAIN ----------
+    if not csv_mode:
+        df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
+        for c in ["strike_price", "mark_price", "oi_contracts"]:
+            df_mp[c] = pd.to_numeric(df_mp[c], errors="coerce")
+    
+        calls = df_mp[df_mp["contract_type"] == "call_options"]
+        puts = df_mp[df_mp["contract_type"] == "put_options"]
+    
+        mp = pd.merge(
+            calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
+            puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
+            on="strike_price",
+            how="outer",
+        ).sort_values("strike_price")
+    
+        live_mp = compute_max_pain(mp)
+        now_ts = get_ist_hhmm()
+        live_mp.columns = ["strike_price", f"MP ({now_ts})"]
+    
+    else:
+        # CSV mode: use existing MP from T2
+        live_mp = df_t2.reset_index()
+        live_mp.columns = ["strike_price", f"MP ({t2})"]
+        now_ts = t2
 
-    mp = pd.merge(
-        calls.rename(columns={"mark_price": "call_mark", "oi_contracts": "call_oi"}),
-        puts.rename(columns={"mark_price": "put_mark", "oi_contracts": "put_oi"}),
-        on="strike_price",
-        how="outer",
-    ).sort_values("strike_price")
-
-    def compute_max_pain(df):
-        A, B = df["call_mark"].fillna(0), df["call_oi"].fillna(0)
-        G = df["strike_price"]
-        L, M = df["put_oi"].fillna(0), df["put_mark"].fillna(0)
-        df["Current"] = [
-            (-sum(A[i:] * B[i:]) + G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-             - sum(M[:i] * L[:i]) + sum(G[i:] * L[i:]) - G[i] * sum(L[i:])) / 10000
-            for i in range(len(df))
-        ]
-        return df[["strike_price", "Current"]]
-
-    live_mp = compute_max_pain(mp)
-    now_ts = t2 if csv_mode else get_ist_hhmm()
-    live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
     # ---------- FINAL MERGE ----------
     final = (
