@@ -142,12 +142,36 @@ p1, p2 = st.columns(2)
 p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 
+# ==========================================
+# OI Weighted Strike Range Settings
+# ==========================================
+st.subheader("📌 OI Weighted Strike Range Settings")
+
+r1, r2 = st.columns([2, 1])
+
+with r1:
+    ref_price = st.number_input(
+        "Reference Price (Default = LTP)",
+        value=float(prices[asset]),
+        step=100.0
+    )
+
+with r2:
+    pct_range = st.number_input(
+        "Range %",
+        value=3.0,
+        step=0.5
+    )
+
+
 # -------------------------------------------------
 # MAIN LOOP
 # -------------------------------------------------
 pcr_rows = []
 
 for UNDERLYING in ASSETS:
+    low = ref_price * (1 - pct_range / 100)
+    high = ref_price * (1 + pct_range / 100)
 
     file_path = f"data/{UNDERLYING}_{selected_expiry}.csv"
     if not os.path.exists(file_path):
@@ -217,6 +241,21 @@ for UNDERLYING in ASSETS:
     })
     live_agg["strike_price"] = pd.to_numeric(live_agg["strike_price"], errors="coerce")
     csv_t1["strike_price"] = pd.to_numeric(csv_t1["strike_price"], errors="coerce")
+    if not csv_mode:
+        # Live OI
+        oi_base = live_agg.copy()
+    else:
+        # T1 OI
+        oi_base = csv_t1.copy()
+
+    oi_range = oi_base[
+        (oi_base["strike_price"] >= low) &
+        (oi_base["strike_price"] <= high)
+    ]
+    call_sum = (oi_range["Call OI"] * oi_range["strike_price"]).sum()
+    put_sum = (oi_range["Put OI"] * oi_range["strike_price"]).sum()
+    diff_sum = put_sum - call_sum
+
 
 
     # ---------- OI / VOLUME DELTA (TOGGLE CONTROLLED) ----------
@@ -252,6 +291,14 @@ for UNDERLYING in ASSETS:
         ).fillna(0)
     
     delta_live = pd.DataFrame({
+        delta_range = delta_live[
+            (delta_live["strike_price"] >= low) &
+            (delta_live["strike_price"] <= high)
+        ]
+        d_call_sum = (delta_range["Δ Call OI"] * delta_range["strike_price"]).sum()
+        d_put_sum = (delta_range["Δ Put OI"] * delta_range["strike_price"]).sum()
+        d_diff = d_put_sum - d_call_sum
+
         "strike_price": merged_oi["strike_price"],
         "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
         "Δ Put OI": merged_oi["Put OI_new"] - merged_oi["Put OI_old"],
@@ -327,6 +374,19 @@ for UNDERLYING in ASSETS:
         if row[f"MP ({now_ts})"] == min_mp:
             return ["background-color:#8B0000;color:white"] * len(row)
         return [""] * len(row)
+
+
+    s1, s2, s3 = st.columns(3)
+
+    s1.metric("Σ Call OI × Strike", f"{call_sum:,.0f}")
+    s2.metric("Σ Put OI × Strike", f"{put_sum:,.0f}")
+    s3.metric("Put − Call", f"{diff_sum:,.0f}")
+
+    d1, d2, d3 = st.columns(3)
+
+    d1.metric("Σ Δ Call OI × Strike", f"{d_call_sum:,.0f}")
+    d2.metric("Σ Δ Put OI × Strike", f"{d_put_sum:,.0f}")
+    d3.metric("ΔPut − ΔCall", f"{d_diff:,.0f}")
 
     st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
     st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True)
