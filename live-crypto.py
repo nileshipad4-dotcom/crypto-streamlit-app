@@ -108,9 +108,6 @@ c1, c2, c3 = st.columns([1, 6, 3])
 with c1:
     asset = st.selectbox("", ASSETS)
 
-with c3:
-    expiry_list = get_expiries()
-    selected_expiry = st.selectbox("Expiry", expiry_list)
 
 with c2:
     if st.button("⏱ Load Timestamps"):
@@ -247,10 +244,11 @@ for UNDERLYING in ASSETS:
     delta_live = pd.DataFrame({
         "strike_price": merged_oi["strike_price"],
         "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
-        "Δ Put OI": merged_oi["Put OI_live"] - merged_oi["Put OI_t1"],
-        "Δ Call Volume": merged_oi["Call Volume_live"] - merged_oi["Call Volume_t1"],
-        "Δ Put Volume": merged_oi["Put Volume_live"] - merged_oi["Put Volume_t1"],
+        "Δ Put OI": merged_oi["Put OI_new"] - merged_oi["Put OI_old"],
+        "Δ Call Volume": merged_oi["Call Volume_new"] - merged_oi["Call Volume_old"],
+        "Δ Put Volume": merged_oi["Put Volume_new"] - merged_oi["Put Volume_old"],
     })
+
 
     # ---------- LIVE MAX PAIN ----------
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
