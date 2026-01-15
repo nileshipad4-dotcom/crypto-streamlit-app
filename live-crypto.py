@@ -298,13 +298,15 @@ for UNDERLYING in ASSETS:
         "Δ Call Volume": merged_oi["Call Volume_new"] - merged_oi["Call Volume_old"],
         "Δ Put Volume": merged_oi["Put Volume_new"] - merged_oi["Put Volume_old"],
     })
-      delta_range = delta_live[
-            (delta_live["strike_price"] >= low) &
-            (delta_live["strike_price"] <= high)
-        ]
-        d_call_sum = (delta_range["Δ Call OI"] * delta_range["strike_price"]).sum()
-        d_put_sum = (delta_range["Δ Put OI"] * delta_range["strike_price"]).sum()
-        d_diff = d_put_sum - d_call_sum
+    delta_range = delta_live[
+        (delta_live["strike_price"] >= low) &
+        (delta_live["strike_price"] <= high)
+    ]
+    
+    d_call_sum = (delta_range["Δ Call OI"] * delta_range["strike_price"]).sum()
+    d_put_sum = (delta_range["Δ Put OI"] * delta_range["strike_price"]).sum()
+    d_diff = d_put_sum - d_call_sum
+
 
 
     # ---------- LIVE MAX PAIN ----------
