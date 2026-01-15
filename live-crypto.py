@@ -382,17 +382,21 @@ for UNDERLYING in ASSETS:
         return [""] * len(row)
 
 
+    # Scaling factor based on asset
+    scale = 10_000_000 if UNDERLYING == "BTC" else 100_000
+    
     s1, s2, s3 = st.columns(3)
-
-    s1.metric("Σ Call OI × Strike", f"{call_sum:,.0f}")
-    s2.metric("Σ Put OI × Strike", f"{put_sum:,.0f}")
-    s3.metric("Put − Call", f"{diff_sum:,.0f}")
-
+    
+    s1.metric("Σ Call OI × Strike", f"{int(call_sum / scale):,}")
+    s2.metric("Σ Put OI × Strike", f"{int(put_sum / scale):,}")
+    s3.metric("Put − Call", f"{int(diff_sum / scale):,}")
+    
     d1, d2, d3 = st.columns(3)
+    
+    d1.metric("Σ Δ Call OI × Strike", f"{int(d_call_sum / scale):,}")
+    d2.metric("Σ Δ Put OI × Strike", f"{int(d_put_sum / scale):,}")
+    d3.metric("ΔPut − ΔCall", f"{int(d_diff / scale):,}")
 
-    d1.metric("Σ Δ Call OI × Strike", f"{d_call_sum:,.0f}")
-    d2.metric("Σ Δ Put OI × Strike", f"{d_put_sum:,.0f}")
-    d3.metric("ΔPut − ΔCall", f"{d_diff:,.0f}")
 
     st.subheader(f"{UNDERLYING} — {t1} vs {t2}")
     st.dataframe(final.style.apply(highlight, axis=1), use_container_width=True)
