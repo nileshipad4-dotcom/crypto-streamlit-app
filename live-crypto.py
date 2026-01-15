@@ -291,7 +291,14 @@ for UNDERLYING in ASSETS:
         ).fillna(0)
     
     delta_live = pd.DataFrame({
-        delta_range = delta_live[
+      
+        "strike_price": merged_oi["strike_price"],
+        "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
+        "Δ Put OI": merged_oi["Put OI_new"] - merged_oi["Put OI_old"],
+        "Δ Call Volume": merged_oi["Call Volume_new"] - merged_oi["Call Volume_old"],
+        "Δ Put Volume": merged_oi["Put Volume_new"] - merged_oi["Put Volume_old"],
+    })
+      delta_range = delta_live[
             (delta_live["strike_price"] >= low) &
             (delta_live["strike_price"] <= high)
         ]
@@ -299,12 +306,6 @@ for UNDERLYING in ASSETS:
         d_put_sum = (delta_range["Δ Put OI"] * delta_range["strike_price"]).sum()
         d_diff = d_put_sum - d_call_sum
 
-        "strike_price": merged_oi["strike_price"],
-        "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
-        "Δ Put OI": merged_oi["Put OI_new"] - merged_oi["Put OI_old"],
-        "Δ Call Volume": merged_oi["Call Volume_new"] - merged_oi["Call Volume_old"],
-        "Δ Put Volume": merged_oi["Put Volume_new"] - merged_oi["Put Volume_old"],
-    })
 
     # ---------- LIVE MAX PAIN ----------
     df_mp = df_live[["strike_price", "contract_type", "mark_price", "oi_contracts"]].copy()
