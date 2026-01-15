@@ -61,6 +61,31 @@ def extract_timestamps_from_local_csv(underlying, expiry):
 
     return sorted(times, key=sort_key)
 
+
+def compute_max_pain(df):
+    A = df["call_mark"].fillna(0)
+    B = df["call_oi"].fillna(0)
+    G = df["strike_price"]
+    L = df["put_oi"].fillna(0)
+    M = df["put_mark"].fillna(0)
+
+    pain = []
+
+    for i in range(len(df)):
+        pain_value = (
+            -sum(A[i:] * B[i:]) +
+            G.iloc[i] * sum(B[:i]) -
+            sum(G[:i] * B[:i]) -
+            sum(M[:i] * L[:i]) +
+            sum(G[i:] * L[i:]) -
+            G.iloc[i] * sum(L[i:])
+        ) / 10000
+
+        pain.append(pain_value)
+
+    df["Current"] = pain
+    return df[["strike_price", "Current"]]
+
 # -------------------------------------------------
 # EXPIRY LOGIC
 # -------------------------------------------------
