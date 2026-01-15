@@ -99,6 +99,7 @@ def get_expiries():
 
     return sorted([d.strftime("%d-%m-%Y") for d in expiries])
 
+
 # -------------------------------------------------
 # CONTROLS
 # -------------------------------------------------
@@ -126,6 +127,13 @@ if len(timestamps) < 2:
 
 t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
+
+
+with c3:
+    expiry_list = get_expiries()
+    selected_expiry = st.selectbox("Expiry", expiry_list)
+
+    csv_mode = st.toggle("📁 CSV Mode (T1 vs T2)", value=False)
 
 # -------------------------------------------------
 # LIVE PRICES
@@ -175,14 +183,24 @@ for UNDERLYING in ASSETS:
     merged = merged.reset_index()
 
     # ---------- LIVE API ----------
-    df_live = pd.json_normalize(
-        requests.get(
-            f"{API_BASE}?contract_types=call_options,put_options"
-            f"&underlying_asset_symbols={UNDERLYING}"
-            f"&expiry_date={selected_expiry}",
-            timeout=20,
-        ).json()["result"]
-    )
+    if not csv_mode:
+        df_live = pd.json_normalize(
+            requests.get(
+                f"{API_BASE}?contract_types=call_options,put_options"
+                f"&underlying_asset_symbols={UNDERLYING}"
+                f"&expiry_date={selected_expiry}",
+                timeout=20,
+            ).json()["result"]
+        )
+    else:
+        df_live = df[df["timestamp"] == t2].copy()
+        df_live["contract_type"] = df_live.apply(
+            lambda r: "call_options" if r["call_oi"] > 0 else "put_options",
+            axis=1
+        )
+        df_live["oi_contracts"] = df_live["call_oi"].fillna(0) + df_live["put_oi"].fillna(0)
+        df_live["volume"] = df_live["call_vol"].fillna(0) + df_live["put_vol"].fillna(0)
+
 
     df_live["oi_contracts"] = pd.to_numeric(df_live["oi_contracts"], errors="coerce")
     df_live["volume"] = pd.to_numeric(df_live["volume"], errors="coerce")
@@ -223,12 +241,12 @@ for UNDERLYING in ASSETS:
         csv_t1,
         on="strike_price",
         how="outer",
-        suffixes=("_live", "_t1")
+        suffixes=("_new", "_old")
     ).fillna(0)
 
     delta_live = pd.DataFrame({
         "strike_price": merged_oi["strike_price"],
-        "Δ Call OI": merged_oi["Call OI_live"] - merged_oi["Call OI_t1"],
+        "Δ Call OI": merged_oi["Call OI_new"] - merged_oi["Call OI_old"],
         "Δ Put OI": merged_oi["Put OI_live"] - merged_oi["Put OI_t1"],
         "Δ Call Volume": merged_oi["Call Volume_live"] - merged_oi["Call Volume_t1"],
         "Δ Put Volume": merged_oi["Put Volume_live"] - merged_oi["Put Volume_t1"],
@@ -261,7 +279,7 @@ for UNDERLYING in ASSETS:
         return df[["strike_price", "Current"]]
 
     live_mp = compute_max_pain(mp)
-    now_ts = get_ist_hhmm()
+    now_ts = t2 if csv_mode else get_ist_hhmm()
     live_mp.columns = ["strike_price", f"MP ({now_ts})"]
 
     # ---------- FINAL MERGE ----------
@@ -272,8 +290,7 @@ for UNDERLYING in ASSETS:
     )
 
     final["△ MP 1"] = final[f"MP ({now_ts})"] - final[f"MP ({t1})"]
-    final["ΔΔ MP 1"] = -1 * (final["△ MP 1"].shift(-1) - final["△ MP 1"])
-
+    
     final = final[
         [
             "strike_price",
@@ -282,7 +299,6 @@ for UNDERLYING in ASSETS:
             f"MP ({t2})",
             "△ MP 1",
             "△ MP 2",
-            "ΔΔ MP 1",
             "Δ Call OI",
             "Δ Put OI",
             "Δ Call Volume",
