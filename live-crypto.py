@@ -383,7 +383,7 @@ for UNDERLYING in ASSETS:
 
 
     # Scaling factor based on asset
-    scale = 10_000_000 if UNDERLYING == "BTC" else 100_000
+    scale = 100_000_000 if UNDERLYING == "BTC" else 1_000_000
     
     s1, s2, s3 = st.columns(3)
     
