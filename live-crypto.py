@@ -108,11 +108,16 @@ c1, c2, c3 = st.columns([1, 6, 3])
 with c1:
     asset = st.selectbox("", ASSETS)
 
+with c3:
+    expiry_list = get_expiries()
+    selected_expiry = st.selectbox("Expiry", expiry_list, key="expiry_select")
+    csv_mode = st.toggle("📁 CSV Mode (T1 vs T2)", value=False)
 
 with c2:
     if st.button("⏱ Load Timestamps"):
         st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
 
+# ✅ AUTO-LOAD IF NOT PRESENT
 if "timestamps" not in st.session_state or not st.session_state.timestamps:
     st.session_state.timestamps = extract_timestamps_from_local_csv(asset, selected_expiry)
 
@@ -124,13 +129,6 @@ if len(timestamps) < 2:
 
 t1 = st.selectbox("Time 1 (Latest)", timestamps, index=0)
 t2 = st.selectbox("Time 2 (Previous)", timestamps, index=1)
-
-
-with c3:
-    expiry_list = get_expiries()
-    selected_expiry = st.selectbox("Expiry", expiry_list)
-
-    csv_mode = st.toggle("📁 CSV Mode (T1 vs T2)", value=False)
 
 # -------------------------------------------------
 # LIVE PRICES
