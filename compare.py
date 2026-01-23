@@ -38,7 +38,7 @@ BASE_RAW_URL = (
 
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 ASSETS = ["BTC", "ETH"]
-PIVOT_TIME = "17:30"
+PIVOT_TIME = "17:31"
 
 
 
@@ -71,7 +71,7 @@ def extract_timestamps_from_local_csv(underlying, expiry):
 
     times = df["timestamp_IST"].astype(str).str[:5].dropna().unique()
 
-    pivot = 17 * 60 + 30  # 5:30 PM in minutes
+    pivot = 17 * 60 + 31  # 5:30 PM in minutes
 
     def sort_key(t):
         h, m = map(int, t.split(":"))
@@ -343,6 +343,7 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 
 
