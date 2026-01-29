@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import calendar
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
@@ -8,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 # PAGE CONFIG
 # =================================================
 st.set_page_config(layout="wide")
-st.title("📊 Live Max Pain — Strike-wise (Single Expiry)")
+st.title("📊 Live Max Pain — Friday Expiry (Strike-wise)")
 
 # =================================================
 # AUTO REFRESH (60s)
@@ -28,17 +29,19 @@ ASSETS = ["BTC", "ETH"]
 def get_ist_datetime():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-def get_next_10_expiries():
-    """Next 10 calendar expiries with day name"""
+def get_next_10_friday_expiries():
+    """Next 10 Friday expiries"""
     start = get_ist_datetime().date()
     expiries = []
 
-    for i in range(10):
-        d = start + timedelta(days=i)
-        expiries.append({
-            "label": f"{d.strftime('%d-%m-%Y')} ({d.strftime('%a')})",
-            "value": d.strftime("%d-%m-%Y")
-        })
+    d = start
+    while len(expiries) < 10:
+        if d.weekday() == calendar.FRIDAY:
+            expiries.append({
+                "label": f"{d.strftime('%d-%m-%Y')} (Fri)",
+                "value": d.strftime("%d-%m-%Y")
+            })
+        d += timedelta(days=1)
 
     return expiries
 
@@ -93,15 +96,15 @@ with c1:
     asset = st.selectbox("Asset", ASSETS)
 
 with c2:
-    expiry_options = get_next_10_expiries()
-    expiry_label_map = {e["label"]: e["value"] for e in expiry_options}
+    expiry_options = get_next_10_friday_expiries()
+    expiry_map = {e["label"]: e["value"] for e in expiry_options}
 
     selected_label = st.selectbox(
-        "Expiry",
-        list(expiry_label_map.keys())
+        "Friday Expiry",
+        list(expiry_map.keys())
     )
 
-selected_expiry = expiry_label_map[selected_label]
+selected_expiry = expiry_map[selected_label]
 
 # =================================================
 # MAIN LOGIC
@@ -149,6 +152,8 @@ def highlight(row):
 
 st.subheader(f"{asset} — {selected_label}")
 st.dataframe(
-    final.style.apply(highlight, axis=1).format({"max_pain": "{:,.0f}"}),
+    final.style
+         .apply(highlight, axis=1)
+         .format({"max_pain": "{:,.0f}"}),
     use_container_width=True
 )
