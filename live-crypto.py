@@ -208,7 +208,8 @@ for UNDERLYING in ASSETS:
     high = base_price * (1 + pct_range / 100)
 
     csv_url = f"{BASE_RAW_URL}{UNDERLYING}_{selected_expiry}.csv"
-    
+
+    st.write("📄 Loading CSV:", csv_url)
     try:
         df_raw = pd.read_csv(csv_url)
     except Exception as e:
