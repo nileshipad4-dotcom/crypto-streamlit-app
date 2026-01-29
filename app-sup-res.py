@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-import calendar
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
@@ -9,10 +8,10 @@ from streamlit_autorefresh import st_autorefresh
 # PAGE CONFIG
 # =================================================
 st.set_page_config(layout="wide")
-st.title("📊 Live Max Pain Matrix (Strike × Expiry)")
+st.title("📊 Live Max Pain — Strike-wise (Single Expiry)")
 
 # =================================================
-# AUTO REFRESH
+# AUTO REFRESH (60s)
 # =================================================
 if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
@@ -29,18 +28,19 @@ ASSETS = ["BTC", "ETH"]
 def get_ist_datetime():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-def get_expiry_list():
-    """Current day + next 5 Fridays"""
-    today = get_ist_datetime().date()
-    expiries = [today]
+def get_next_10_expiries():
+    """Next 10 calendar expiries with day name"""
+    start = get_ist_datetime().date()
+    expiries = []
 
-    d = today
-    while len(expiries) < 6:
-        d += timedelta(days=1)
-        if d.weekday() == calendar.FRIDAY:
-            expiries.append(d)
+    for i in range(10):
+        d = start + timedelta(days=i)
+        expiries.append({
+            "label": f"{d.strftime('%d-%m-%Y')} ({d.strftime('%a')})",
+            "value": d.strftime("%d-%m-%Y")
+        })
 
-    return [e.strftime("%d-%m-%Y") for e in expiries]
+    return expiries
 
 def fetch_option_chain(asset, expiry):
     r = requests.get(
@@ -85,67 +85,70 @@ def compute_max_pain(df):
     return df
 
 # =================================================
-# MAIN
+# CONTROLS
 # =================================================
-expiries = get_expiry_list()
+c1, c2 = st.columns([1, 2])
 
-for asset in ASSETS:
-    st.subheader(f"{asset} — Live Max Pain by Strike")
+with c1:
+    asset = st.selectbox("Asset", ASSETS)
 
-    expiry_tables = []
+with c2:
+    expiry_options = get_next_10_expiries()
+    expiry_label_map = {e["label"]: e["value"] for e in expiry_options}
 
-    for expiry in expiries:
-        raw = fetch_option_chain(asset, expiry)
-        if raw.empty:
-            continue
-
-        # Build strike-wise merged frame
-        calls = raw[raw["contract_type"] == "call_options"][
-            ["strike_price", "mark_price", "oi_contracts"]
-        ].rename(columns={
-            "mark_price": "call_mark",
-            "oi_contracts": "call_oi"
-        })
-
-        puts = raw[raw["contract_type"] == "put_options"][
-            ["strike_price", "mark_price", "oi_contracts"]
-        ].rename(columns={
-            "mark_price": "put_mark",
-            "oi_contracts": "put_oi"
-        })
-
-        mp_df = (
-            pd.merge(calls, puts, on="strike_price", how="outer")
-            .fillna(0)
-            .sort_values("strike_price")
-            .reset_index(drop=True)
-        )
-
-        mp_df = compute_max_pain(mp_df)
-
-        expiry_tables.append(
-            mp_df.set_index("strike_price")["max_pain"]
-                  .rename(expiry)
-        )
-
-    if not expiry_tables:
-        st.warning("No live option data available.")
-        continue
-
-    final = pd.concat(expiry_tables, axis=1).sort_index()
-
-    # Highlight minimum max pain per expiry (true MP)
-    def highlight_min(col):
-        min_val = col.min()
-        return [
-            "background-color:#8B0000;color:white"
-            if v == min_val else ""
-            for v in col
-        ]
-
-    st.dataframe(
-        final.style
-             .apply(highlight_min, axis=0)
-             .format("{:,.0f}"),
-        use_container_width=True
+    selected_label = st.selectbox(
+        "Expiry",
+        list(expiry_label_map.keys())
     )
+
+selected_expiry = expiry_label_map[selected_label]
+
+# =================================================
+# MAIN LOGIC
+# =================================================
+raw = fetch_option_chain(asset, selected_expiry)
+
+if raw.empty:
+    st.warning("No option data available for this expiry.")
+    st.stop()
+
+calls = raw[raw["contract_type"] == "call_options"][
+    ["strike_price", "mark_price", "oi_contracts"]
+].rename(columns={
+    "mark_price": "call_mark",
+    "oi_contracts": "call_oi"
+})
+
+puts = raw[raw["contract_type"] == "put_options"][
+    ["strike_price", "mark_price", "oi_contracts"]
+].rename(columns={
+    "mark_price": "put_mark",
+    "oi_contracts": "put_oi"
+})
+
+mp_df = (
+    pd.merge(calls, puts, on="strike_price", how="outer")
+    .fillna(0)
+    .sort_values("strike_price")
+    .reset_index(drop=True)
+)
+
+mp_df = compute_max_pain(mp_df)
+
+final = mp_df[["strike_price", "max_pain"]]
+
+# =================================================
+# DISPLAY
+# =================================================
+min_pain = final["max_pain"].min()
+
+def highlight(row):
+    if row["max_pain"] == min_pain:
+        return ["background-color:#8B0000;color:white"] * len(row)
+    return [""] * len(row)
+
+st.subheader(f"{asset} — {selected_label}")
+st.dataframe(
+    final.style.apply(highlight, axis=1).format({"max_pain": "{:,.0f}"}),
+    use_container_width=True
+)
