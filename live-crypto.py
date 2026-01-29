@@ -52,7 +52,8 @@ def extract_timestamps_from_local_csv(underlying, expiry):
     if "timestamp_IST" not in df.columns:
         return []
 
-    times = df["timestamp_IST"].astype(str).str[:5].dropna().unique()
+    df["timestamp_IST"] = pd.to_datetime(df["timestamp_IST"], errors="coerce")
+    times = df["timestamp_IST"].dt.strftime("%H:%M").dropna().unique()
     pivot = 17 * 60 + 30  # 5:30 PM
 
     def sort_key(t):
