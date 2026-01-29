@@ -44,17 +44,33 @@ def safe_ratio(a, b):
         return None
 
 def extract_timestamps_from_local_csv(underlying, expiry):
-    file_path = f"data/{underlying}_{expiry}.csv"
-    if not os.path.exists(file_path):
+    url = f"{BASE_RAW_URL}{underlying}_{expiry}.csv"
+
+    try:
+        df = pd.read_csv(url)
+    except Exception as e:
+        st.error(f"CSV load failed: {e}")
         return []
 
-    df = pd.read_csv(file_path)
     if "timestamp_IST" not in df.columns:
+        st.error("timestamp_IST column missing in CSV")
         return []
 
     df["timestamp_IST"] = pd.to_datetime(df["timestamp_IST"], errors="coerce")
-    times = df["timestamp_IST"].dt.strftime("%H:%M").dropna().unique()
-    pivot = 17 * 60 + 30  # 5:30 PM
+
+    times = (
+        df["timestamp_IST"]
+        .dropna()
+        .dt.strftime("%H:%M")
+        .unique()
+        .tolist()
+    )
+
+    if len(times) < 2:
+        st.error("CSV loaded but timestamps < 2")
+        return []
+
+    pivot = 17 * 60 + 31
 
     def sort_key(t):
         h, m = map(int, t.split(":"))
@@ -187,7 +203,7 @@ for UNDERLYING in ASSETS:
     low = base_price * (1 - pct_range / 100)
     high = base_price * (1 + pct_range / 100)
 
-    file_path = f"data/{UNDERLYING}_{selected_expiry}.csv"
+    csv_url = f"{BASE_RAW_URL}{UNDERLYING}_{selected_expiry}.csv"
     if not os.path.exists(file_path):
         st.warning(f"No data file found for {UNDERLYING} {selected_expiry}")
         continue
