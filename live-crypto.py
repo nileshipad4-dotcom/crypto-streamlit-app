@@ -25,7 +25,11 @@ if st_autorefresh(interval=60_000, key="auto_refresh"):
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
 ASSETS = ["BTC", "ETH"]
-
+BASE_RAW_URL = (
+    "https://raw.githubusercontent.com/"
+    "nileshipad4-dotcom/crypto-streamlit-app/"
+    "main/data/"
+)
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
@@ -204,11 +208,12 @@ for UNDERLYING in ASSETS:
     high = base_price * (1 + pct_range / 100)
 
     csv_url = f"{BASE_RAW_URL}{UNDERLYING}_{selected_expiry}.csv"
-    if not os.path.exists(file_path):
-        st.warning(f"No data file found for {UNDERLYING} {selected_expiry}")
+    
+    try:
+        df_raw = pd.read_csv(csv_url)
+    except Exception as e:
+        st.warning(f"Failed to load CSV for {UNDERLYING} {selected_expiry}: {e}")
         continue
-
-    df_raw = pd.read_csv(file_path)
 
     df = pd.DataFrame({
         "strike_price": pd.to_numeric(df_raw["strike_price"], errors="coerce"),
