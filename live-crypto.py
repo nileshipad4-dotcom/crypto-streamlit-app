@@ -340,6 +340,7 @@ def append_csv_to_github(path, new_df, commit_msg):
 now_ts = get_ist_hhmm()
 
 if st.session_state.last_push_ts != now_ts:
+    update_msgs = []
 
     expiry_to_use = get_expiries()[0]  # nearest valid expiry
 
