@@ -44,6 +44,16 @@ GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 CRYPTO_REPO = "nileshipad4-dotcom/crypto-streamlit-app"
 GITHUB_BRANCH = "main"
 GITHUB_API = "https://api.github.com"
+
+CANONICAL_COLS = [
+    "call_mark","call_oi","call_volume",
+    "call_gamma","call_delta","call_vega",
+    "strike_price",
+    "put_gamma","put_delta","put_vega",
+    "put_volume","put_oi","put_mark",
+    "Expiry","timestamp_IST","max_pain"
+]
+
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
@@ -319,6 +329,8 @@ if st.session_state.last_push_ts != now_ts:
             continue
 
         df_live = compute_max_pain_collector(df_live)
+
+        df_live = df_live.reindex(columns=CANONICAL_COLS)
 
         github_path = f"data/{underlying}_{expiry_to_use}.csv"
         commit_msg = f"{underlying} snapshot @ {now_ts} IST"
