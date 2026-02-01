@@ -23,7 +23,7 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 # -------------------------------------------------
 # AUTO REFRESH (60s)
 # -------------------------------------------------
-if st_autorefresh(interval=60_000, key="auto_refresh"):
+if st_autorefresh(interval=360_000, key="auto_refresh"):
     st.cache_data.clear()
 
 if "last_push_ts" not in st.session_state:
