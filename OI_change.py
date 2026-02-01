@@ -22,19 +22,21 @@ st_autorefresh(interval=5_000, key="price_refresh")
 # HELPERS
 # -----------------------------------
 
-@st.cache_data(ttl=3)
-def get_binance_price(symbol):
+DELTA_API = "https://api.india.delta.exchange/v2/tickers"
+
+@st.cache_data(ttl=5)
+def get_delta_price(symbol):
+    """
+    Fetch Delta Exchange USD perpetual mark price
+    symbol: 'BTC' or 'ETH'
+    """
     try:
-        r = requests.get(
-            BINANCE_API,
-            params={"symbol": symbol},
-            timeout=3
+        r = requests.get(DELTA_API, timeout=5).json()["result"]
+        return float(
+            next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"]
         )
-        return float(r.json()["price"])
     except Exception:
         return None
-
-
 
 def get_available_expiries():
     files = [f for f in os.listdir(DATA_DIR) if f.endswith(".csv")]
@@ -197,18 +199,19 @@ def highlight_table(df):
 # -----------------------------------
 st.title("BTC & ETH OI Change Scanner")
 
-btc_price = get_binance_price("BTCUSDT")
-eth_price = get_binance_price("ETHUSDT")
+btc_price = get_delta_price("BTC")
+eth_price = get_delta_price("ETH")
+
 
 p1, p2 = st.columns(2)
 
 p1.metric(
-    "BTC Live Price (USDT)",
+    "BTC Price (Delta USD Perp)",
     f"{btc_price:,.2f}" if btc_price else "—"
 )
 
 p2.metric(
-    "ETH Live Price (USDT)",
+    "ETH Price (Delta USD Perp)",
     f"{eth_price:,.2f}" if eth_price else "—"
 )
 
