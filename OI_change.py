@@ -64,7 +64,7 @@ def build_all_windows(df):
         t1 = times[i]
         target = t1 + timedelta(minutes=MIN_GAP_MINUTES)
 
-        t2 = next((t for t in times[i+1:] if t >= target), None)
+        t2 = next((t for t in times[i + 1:] if t >= target), None)
         if t2 is None:
             break
 
@@ -83,12 +83,13 @@ def process_windows(df):
 
         m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
 
-        # remove top 2 & bottom 2 strikes
+        # ---- remove top 2 & bottom 2 strikes ----
         strikes = sorted(m["strike_price"].unique())
         if len(strikes) <= 4:
             continue
         m = m[m["strike_price"].isin(strikes[2:-2])]
 
+        # ---- deltas ----
         m["CE"] = m["call_oi_2"] - m["call_oi_1"]
         m["PE"] = m["put_oi_2"] - m["put_oi_1"]
 
@@ -97,6 +98,7 @@ def process_windows(df):
 
         sum_ce = int(m["CE"].sum())
         sum_pe = int(m["PE"].sum())
+        diff_ce_pe = sum_ce - sum_pe
 
         rows.append({
             "TIME": f"{t1:%H:%M} - {t2:%H:%M}",
@@ -108,6 +110,8 @@ def process_windows(df):
             "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
             "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
             "Σ ΔPE OI": sum_pe,
+
+            "Δ (CE − PE)": diff_ce_pe,
 
             "_ce1": ce.iloc[0].CE,
             "_ce2": ce.iloc[1].CE,
@@ -125,12 +129,13 @@ def highlight_table(df):
     display_cols = [
         "TIME",
         "MAX CE 1", "MAX CE 2", "Σ ΔCE OI",
-        "MAX PE 1", "MAX PE 2", "Σ ΔPE OI"
+        "MAX PE 1", "MAX PE 2", "Σ ΔPE OI",
+        "Δ (CE − PE)",
     ]
 
     styles = pd.DataFrame("", index=df.index, columns=display_cols)
 
-    # highlight CE / PE max columns
+    # Highlight CE / PE max columns
     for col, num_col in [
         ("MAX CE 1", "_ce1"),
         ("MAX CE 2", "_ce2"),
@@ -150,13 +155,17 @@ def highlight_table(df):
 
     # ---- SUM COLOR LOGIC (TEXT ONLY) ----
     for i in df.index:
-        diff = df.loc[i, "Σ ΔCE OI"] - df.loc[i, "Σ ΔPE OI"]
+        diff = df.loc[i, "Δ (CE − PE)"]
         if diff > 0:
-            styles.loc[i, "Σ ΔCE OI"] = "color:red;font-weight:bold"
-            styles.loc[i, "Σ ΔPE OI"] = "color:red;font-weight:bold"
+            color = "red"
         elif diff < 0:
-            styles.loc[i, "Σ ΔCE OI"] = "color:green;font-weight:bold"
-            styles.loc[i, "Σ ΔPE OI"] = "color:green;font-weight:bold"
+            color = "green"
+        else:
+            continue
+
+        styles.loc[i, "Σ ΔCE OI"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Σ ΔPE OI"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Δ (CE − PE)"] = f"color:{color};font-weight:bold"
 
     return df[display_cols].style.apply(lambda _: styles, axis=None)
 
@@ -186,4 +195,3 @@ st.divider()
 st.subheader("ETH")
 eth = process_windows(load_data("ETH", expiry))
 st.dataframe(highlight_table(eth), use_container_width=True)
-
