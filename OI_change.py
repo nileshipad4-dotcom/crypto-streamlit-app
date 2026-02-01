@@ -3,6 +3,8 @@ import pandas as pd
 import requests
 from datetime import timedelta, datetime
 import os
+from streamlit_autorefresh import st_autorefresh
+
 
 # -----------------------------------
 # CONFIG
@@ -13,15 +15,25 @@ BINANCE_API = "https://api.binance.com/api/v3/ticker/price"
 
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 
+# Auto refresh every 5 seconds
+st_autorefresh(interval=5_000, key="price_refresh")
+
 # -----------------------------------
 # HELPERS
 # -----------------------------------
+
+@st.cache_data(ttl=3)
 def get_binance_price(symbol):
     try:
-        r = requests.get(BINANCE_API, params={"symbol": symbol}, timeout=5)
+        r = requests.get(
+            BINANCE_API,
+            params={"symbol": symbol},
+            timeout=3
+        )
         return float(r.json()["price"])
-    except:
+    except Exception:
         return None
+
 
 
 def get_available_expiries():
@@ -185,9 +197,21 @@ def highlight_table(df):
 # -----------------------------------
 st.title("BTC & ETH OI Change Scanner")
 
-c1, c2 = st.columns(2)
-c1.metric("BTC Price", get_binance_price("BTCUSDT"))
-c2.metric("ETH Price", get_binance_price("ETHUSDT"))
+btc_price = get_binance_price("BTCUSDT")
+eth_price = get_binance_price("ETHUSDT")
+
+p1, p2 = st.columns(2)
+
+p1.metric(
+    "BTC Live Price (USDT)",
+    f"{btc_price:,.2f}" if btc_price else "—"
+)
+
+p2.metric(
+    "ETH Live Price (USDT)",
+    f"{eth_price:,.2f}" if eth_price else "—"
+)
+
 
 expiries = get_available_expiries()
 expiry = st.selectbox("Select Expiry", expiries, index=len(expiries) - 1)
