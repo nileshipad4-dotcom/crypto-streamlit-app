@@ -36,26 +36,39 @@ def get_available_expiries():
 def load_data(symbol, expiry):
     path = f"{DATA_DIR}/{symbol}_{expiry}.csv"
     df = pd.read_csv(path)
+
+    # Preserve CSV order
+    df["_row_order"] = range(len(df))
     df["timestamp_IST"] = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
+
     return df
 
 
 def build_all_windows(df):
-    times = sorted(df["timestamp_IST"].unique())
-    windows = []
+    # timestamps in CSV appearance order
+    times = (
+        df.sort_values("_row_order")
+          .drop_duplicates("timestamp_IST")["timestamp_IST"]
+          .tolist()
+    )
 
+    windows = []
     i = 0
+
     while i < len(times) - 1:
         t1 = times[i]
         target = t1 + timedelta(minutes=MIN_GAP_MINUTES)
 
-        t2_candidates = [t for t in times if t >= target]
-        if not t2_candidates:
+        t2 = None
+        for t in times[i + 1:]:
+            if t >= target:
+                t2 = t
+                break
+
+        if t2 is None:
             break
 
-        t2 = t2_candidates[0]
         windows.append((t1, t2))
-
         i = times.index(t2)
 
     return windows
@@ -63,10 +76,7 @@ def build_all_windows(df):
 
 def process_windows(df):
     rows = []
-
     windows = build_all_windows(df)
-    if not windows:
-        return pd.DataFrame()
 
     for t1, t2 in windows:
         df1 = df[df["timestamp_IST"] == t1]
@@ -96,15 +106,13 @@ def process_windows(df):
             "_pe2": pe.iloc[1].PE_CHANGE,
         })
 
-    df_out = pd.DataFrame(rows)
-    return df_out
+    return pd.DataFrame(rows)
 
 
 def highlight_table(df):
     numeric_cols = ["_ce1", "_ce2", "_pe1", "_pe2"]
     values = df[numeric_cols].abs().values.flatten()
-    max1 = sorted(values, reverse=True)[0]
-    max2 = sorted(values, reverse=True)[1]
+    max1, max2 = sorted(values, reverse=True)[:2]
 
     def style(val):
         try:
