@@ -185,7 +185,7 @@ def process_windows(df):
 
     live_end = df["timestamp_IST"].max()
 
-    if live_end > live_start:
+    if live_end >= live_start:
         row = build_row(df, live_start, live_end, is_live=True)
         if row:
             rows.append(row)
