@@ -37,24 +37,18 @@ def load_data(symbol, expiry):
     df = pd.read_csv(f"{DATA_DIR}/{symbol}_{expiry}.csv")
     df["_row"] = range(len(df))
 
-    # parse time only
-    df["timestamp_raw"] = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
+    # ---- handle midnight rollover ----
+    raw_times = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
+    base = datetime(2000, 1, 1)
+    out, last, day = [], None, 0
 
-    # ---- FIX: HANDLE MIDNIGHT ROLLOVER ----
-    base_date = datetime(2000, 1, 1)
-    timestamps = []
-    last_time = None
-    day_offset = 0
+    for t in raw_times:
+        if last is not None and t < last:
+            day += 1
+        out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
+        last = t
 
-    for t in df.sort_values("_row")["timestamp_raw"]:
-        if last_time and t < last_time:
-            day_offset += 1
-        timestamps.append(base_date + timedelta(days=day_offset,
-                                                 hours=t.hour,
-                                                 minutes=t.minute))
-        last_time = t
-
-    df["timestamp_IST"] = timestamps
+    df["timestamp_IST"] = out
     return df
 
 
@@ -65,19 +59,12 @@ def build_all_windows(df):
           .tolist()
     )
 
-    windows = []
-    i = 0
-
+    windows, i = [], 0
     while i < len(times) - 1:
         t1 = times[i]
         target = t1 + timedelta(minutes=MIN_GAP_MINUTES)
 
-        t2 = None
-        for t in times[i + 1:]:
-            if t >= target:
-                t2 = t
-                break
-
+        t2 = next((t for t in times[i+1:] if t >= target), None)
         if t2 is None:
             break
 
@@ -91,29 +78,40 @@ def process_windows(df):
     rows = []
 
     for t1, t2 in build_all_windows(df):
-        df1 = df[df["timestamp_IST"] == t1]
-        df2 = df[df["timestamp_IST"] == t2]
+        d1 = df[df["timestamp_IST"] == t1]
+        d2 = df[df["timestamp_IST"] == t2]
 
-        merged = pd.merge(df1, df2, on="strike_price", suffixes=("_1", "_2"))
+        m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
 
-        # remove top 2 & bottom 2 strikes
-        strikes = sorted(merged["strike_price"].unique())
+        # ---- remove top 2 & bottom 2 strikes ----
+        strikes = sorted(m["strike_price"].unique())
         if len(strikes) <= 4:
             continue
-        merged = merged[merged["strike_price"].isin(strikes[2:-2])]
 
-        merged["CE"] = merged["call_oi_2"] - merged["call_oi_1"]
-        merged["PE"] = merged["put_oi_2"] - merged["put_oi_1"]
+        m = m[m["strike_price"].isin(strikes[2:-2])]
 
-        ce = merged.sort_values("CE", ascending=False)
-        pe = merged.sort_values("PE", ascending=False)
+        # ---- deltas ----
+        m["CE"] = m["call_oi_2"] - m["call_oi_1"]
+        m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+
+        ce = m.sort_values("CE", ascending=False)
+        pe = m.sort_values("PE", ascending=False)
+
+        # ---- SUMS (new requirement) ----
+        sum_ce = int(m["CE"].sum())
+        sum_pe = int(m["PE"].sum())
 
         rows.append({
             "TIME": f"{t1:%H:%M} - {t2:%H:%M}",
+
             "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
             "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
+            "Σ ΔCE OI": sum_ce,
+
             "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
             "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
+            "Σ ΔPE OI": sum_pe,
+
             "_ce1": ce.iloc[0].CE,
             "_ce2": ce.iloc[1].CE,
             "_pe1": pe.iloc[0].PE,
@@ -124,18 +122,18 @@ def process_windows(df):
 
 
 # -----------------------------------
-# CORRECT HIGHLIGHTING (COLUMN-WISE)
+# HIGHLIGHTING
 # -----------------------------------
 def highlight_table(df):
-    display_cols = ["TIME", "MAX CE 1", "MAX CE 2", "MAX PE 1", "MAX PE 2"]
+    display_cols = [
+        "TIME",
+        "MAX CE 1", "MAX CE 2", "Σ ΔCE OI",
+        "MAX PE 1", "MAX PE 2", "Σ ΔPE OI"
+    ]
 
-    # Create empty styles ONLY for displayed columns
-    styles = pd.DataFrame(
-        "",
-        index=df.index,
-        columns=display_cols
-    )
+    styles = pd.DataFrame("", index=df.index, columns=display_cols)
 
+    # highlight CE / PE max columns
     for col, num_col in [
         ("MAX CE 1", "_ce1"),
         ("MAX CE 2", "_ce2"),
@@ -143,27 +141,25 @@ def highlight_table(df):
         ("MAX PE 2", "_pe2"),
     ]:
         vals = df[num_col].abs()
-
         if len(vals) < 2:
             continue
-
         top1, top2 = vals.nlargest(2).values
 
         for i, v in vals.items():
             if v == top1:
-                styles.loc[i, col] = (
-                    "background-color:#ff4d4d;"
-                    "color:white;"
-                    "font-weight:bold"
-                )
+                styles.loc[i, col] = "background-color:#ff4d4d;color:white;font-weight:bold"
             elif v == top2:
-                styles.loc[i, col] = (
-                    "background-color:#ffa500;"
-                    "font-weight:bold"
-                )
+                styles.loc[i, col] = "background-color:#ffa500;font-weight:bold"
+
+    # highlight SUM columns (directional)
+    for col in ["Σ ΔCE OI", "Σ ΔPE OI"]:
+        for i, v in df[col].items():
+            if v > 0:
+                styles.loc[i, col] = "background-color:#e6ffe6;font-weight:bold"
+            elif v < 0:
+                styles.loc[i, col] = "background-color:#ffe6e6;font-weight:bold"
 
     return df[display_cols].style.apply(lambda _: styles, axis=None)
-
 
 
 # -----------------------------------
