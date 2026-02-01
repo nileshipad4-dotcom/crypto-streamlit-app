@@ -127,7 +127,14 @@ def process_windows(df):
 # CORRECT HIGHLIGHTING (COLUMN-WISE)
 # -----------------------------------
 def highlight_table(df):
-    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    display_cols = ["TIME", "MAX CE 1", "MAX CE 2", "MAX PE 1", "MAX PE 2"]
+
+    # Create empty styles ONLY for displayed columns
+    styles = pd.DataFrame(
+        "",
+        index=df.index,
+        columns=display_cols
+    )
 
     for col, num_col in [
         ("MAX CE 1", "_ce1"),
@@ -136,16 +143,27 @@ def highlight_table(df):
         ("MAX PE 2", "_pe2"),
     ]:
         vals = df[num_col].abs()
+
+        if len(vals) < 2:
+            continue
+
         top1, top2 = vals.nlargest(2).values
 
         for i, v in vals.items():
             if v == top1:
-                styles.loc[i, col] = "background-color:#ff4d4d;color:white;font-weight:bold"
+                styles.loc[i, col] = (
+                    "background-color:#ff4d4d;"
+                    "color:white;"
+                    "font-weight:bold"
+                )
             elif v == top2:
-                styles.loc[i, col] = "background-color:#ffa500;font-weight:bold"
+                styles.loc[i, col] = (
+                    "background-color:#ffa500;"
+                    "font-weight:bold"
+                )
 
-    return df[["TIME","MAX CE 1","MAX CE 2","MAX PE 1","MAX PE 2"]]\
-        .style.apply(lambda _: styles, axis=None)
+    return df[display_cols].style.apply(lambda _: styles, axis=None)
+
 
 
 # -----------------------------------
