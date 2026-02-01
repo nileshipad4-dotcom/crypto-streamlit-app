@@ -265,9 +265,9 @@ def highlight_table(df):
     for i in df.index:
         diff = df.loc[i, "Δ (PE − CE)"]
         if diff > 0:
-            color = "red"
-        elif diff < 0:
             color = "green"
+        elif diff < 0:
+            color = "red"
         else:
             continue
 
