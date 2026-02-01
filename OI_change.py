@@ -52,12 +52,29 @@ def get_delta_price(symbol):
         return None
 
 def get_available_expiries():
-    files = [f for f in os.listdir(DATA_DIR) if f.endswith(".csv")]
-    expiries = sorted(
-        list(set(f.split("_")[1].replace(".csv", "") for f in files)),
-        key=lambda x: datetime.strptime(x, "%d-%m-%Y")
-    )
-    return expiries
+    expiries = set()
+
+    for f in os.listdir(DATA_DIR):
+        if not f.endswith(".csv"):
+            continue
+
+        parts = f.replace(".csv", "").split("_")
+
+        # Expect format: BTC_25-10-2024.csv
+        if len(parts) != 2:
+            continue
+
+        expiry = parts[1]
+
+        try:
+            datetime.strptime(expiry, "%d-%m-%Y")
+            expiries.add(expiry)
+        except ValueError:
+            # skips BTC_OI_WINDOWS.csv etc
+            continue
+
+    return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+
 
 
 def load_data(symbol, expiry):
