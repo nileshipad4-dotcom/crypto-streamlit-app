@@ -7,8 +7,6 @@ import calendar
 import os
 from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
-import base64
-
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -23,16 +21,6 @@ if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
 
 # -------------------------------------------------
-# SESSION STATE INIT (GITHUB PUSH CONTROL)
-# -------------------------------------------------
-if "last_push_ts" not in st.session_state:
-    st.session_state.last_push_ts = None
-
-# -------------------------------------------------
-# AUTO PUSH LIVE SNAPSHOTS TO GITHUB (ON REFRESH)
-# -------------------------------------------------
-
-# -------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
@@ -42,12 +30,6 @@ BASE_RAW_URL = (
     "nileshipad4-dotcom/crypto-streamlit-app/"
     "main/data/"
 )
-
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-CRYPTO_REPO = "nileshipad4-dotcom/crypto-streamlit-app"
-GITHUB_BRANCH = "main"
-GITHUB_API = "https://api.github.com"
-
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
@@ -101,6 +83,88 @@ def extract_timestamps_from_local_csv(underlying, expiry):
     return sorted(times, key=sort_key)
 
 
+@st.cache_data(ttl=15)
+def fetch_live_collector_data(underlying, expiry):
+    url = (
+        f"{API_BASE}"
+        f"?contract_types=call_options,put_options"
+        f"&underlying_asset_symbols={underlying}"
+        f"&expiry_date={expiry}"
+    )
+
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200:
+        return pd.DataFrame()
+
+    raw = r.json().get("result", [])
+    if not raw:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(raw)
+
+    df = df[
+        [
+            "strike_price", "contract_type",
+            "mark_price", "oi_contracts", "volume",
+            "greeks.gamma", "greeks.delta", "greeks.vega"
+        ]
+    ]
+
+    df.rename(columns={
+        "greeks.gamma": "gamma",
+        "greeks.delta": "delta",
+        "greeks.vega": "vega",
+    }, inplace=True)
+
+    for c in ["strike_price", "mark_price", "oi_contracts", "volume", "gamma", "delta", "vega"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    calls = df[df["contract_type"] == "call_options"].copy()
+    puts  = df[df["contract_type"] == "put_options"].copy()
+
+    calls = calls.rename(columns={
+        "mark_price": "call_mark",
+        "oi_contracts": "call_oi",
+        "volume": "call_volume",
+        "gamma": "call_gamma",
+        "delta": "call_delta",
+        "vega": "call_vega",
+    }).drop(columns=["contract_type"])
+
+    puts = puts.rename(columns={
+        "mark_price": "put_mark",
+        "oi_contracts": "put_oi",
+        "volume": "put_volume",
+        "gamma": "put_gamma",
+        "delta": "put_delta",
+        "vega": "put_vega",
+    }).drop(columns=["contract_type"])
+
+    merged = pd.merge(calls, puts, on="strike_price", how="outer")
+    merged = merged.sort_values("strike_price").reset_index(drop=True)
+
+    merged["timestamp_IST"] = get_ist_hhmm()
+    merged["Expiry"] = expiry
+
+    return merged
+
+def compute_max_pain_collector(df):
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
+    for i in range(len(df)):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        mp.append(round((q + r + s + t) / 10000))
+
+    df["max_pain"] = mp
+    return df
 
 # -------------------------------------------------
 # EXPIRY LOGIC
@@ -184,155 +248,6 @@ p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 if "ref_price" not in st.session_state:
     st.session_state.ref_price = float(prices[asset])
-
-
-@st.cache_data(ttl=15)
-def fetch_live_collector_data(underlying, expiry):
-    url = (
-        f"{API_BASE}"
-        f"?contract_types=call_options,put_options"
-        f"&underlying_asset_symbols={underlying}"
-        f"&expiry_date={expiry}"
-    )
-
-    r = requests.get(url, timeout=15)
-    if r.status_code != 200:
-        return pd.DataFrame()
-
-    raw = r.json().get("result", [])
-    if not raw:
-        return pd.DataFrame()
-
-    df = pd.json_normalize(raw)
-
-    df = df[
-        [
-            "strike_price", "contract_type",
-            "mark_price", "oi_contracts", "volume",
-            "greeks.gamma", "greeks.delta", "greeks.vega"
-        ]
-    ]
-
-    df.rename(columns={
-        "greeks.gamma": "gamma",
-        "greeks.delta": "delta",
-        "greeks.vega": "vega",
-    }, inplace=True)
-
-    for c in ["strike_price", "mark_price", "oi_contracts", "volume", "gamma", "delta", "vega"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    calls = df[df["contract_type"] == "call_options"].copy()
-    puts  = df[df["contract_type"] == "put_options"].copy()
-
-    calls = calls.rename(columns={
-        "mark_price": "call_mark",
-        "oi_contracts": "call_oi",
-        "volume": "call_volume",
-        "gamma": "call_gamma",
-        "delta": "call_delta",
-        "vega": "call_vega",
-    }).drop(columns=["contract_type"])
-
-    puts = puts.rename(columns={
-        "mark_price": "put_mark",
-        "oi_contracts": "put_oi",
-        "volume": "put_volume",
-        "gamma": "put_gamma",
-        "delta": "put_delta",
-        "vega": "put_vega",
-    }).drop(columns=["contract_type"])
-
-    merged = pd.merge(calls, puts, on="strike_price", how="outer")
-    merged = merged.sort_values("strike_price").reset_index(drop=True)
-
-    merged["timestamp_IST"] = get_ist_hhmm()
-    merged["Expiry"] = expiry
-
-    return merged
-
-
-
-
-def compute_max_pain_collector(df):
-    A = df["call_mark"].fillna(0).values
-    B = df["call_oi"].fillna(0).values
-    G = df["strike_price"].values
-    L = df["put_oi"].fillna(0).values
-    M = df["put_mark"].fillna(0).values
-
-    mp = []
-    for i in range(len(df)):
-        q = -sum(A[i:] * B[i:])
-        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-        s = -sum(M[:i] * L[:i])
-        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-        mp.append(round((q + r + s + t) / 10000))
-
-    df["max_pain"] = mp
-    return df
-
-
-def push_csv_to_github(path, csv_text, commit_msg):
-    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
-
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-
-    # check if file exists
-    r = requests.get(url, headers=headers)
-    sha = r.json().get("sha") if r.status_code == 200 else None
-
-    payload = {
-        "message": commit_msg,
-        "content": base64.b64encode(csv_text.encode()).decode(),
-        "branch": GITHUB_BRANCH,
-    }
-
-    if sha:
-        payload["sha"] = sha
-
-    requests.put(url, headers=headers, json=payload)
-
-def collect_live_snapshot(underlying, expiry):
-    df = fetch_live_collector_data(underlying, expiry)
-    if df is None or df.empty:
-        return None
-
-    df = compute_max_pain_collector(df)
-    return df
-
-
-
-
-
-now_ts = get_ist_hhmm()
-
-if st.session_state.last_push_ts != now_ts:
-
-    expiry_to_use = get_expiries()[0]  # nearest valid expiry
-
-    for underlying in ["BTC", "ETH"]:
-        df_live = collect_live_snapshot(underlying, expiry_to_use)
-
-        if df_live is None or df_live.empty:
-            continue
-
-        csv_text = df_live.to_csv(index=False)
-
-        github_path = f"data/{underlying}_{expiry_to_use}.csv"
-        commit_msg = f"{underlying} snapshot @ {now_ts} IST"
-
-        push_csv_to_github(
-            path=github_path,
-            csv_text=csv_text,
-            commit_msg=commit_msg
-        )
-
-    st.session_state.last_push_ts = now_ts
-
 
 # ==========================================
 # OI Weighted Strike Range Settings
@@ -650,6 +565,7 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
 
 st.divider()
 st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
