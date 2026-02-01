@@ -4,7 +4,8 @@ import requests
 from datetime import timedelta, datetime
 import os
 from streamlit_autorefresh import st_autorefresh
-
+import base64
+from io import StringIO
 
 # -----------------------------------
 # CONFIG
@@ -16,13 +17,25 @@ BINANCE_API = "https://api.binance.com/api/v3/ticker/price"
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 
 # Auto refresh every 5 seconds
-st_autorefresh(interval=5_000, key="price_refresh")
+st_autorefresh(interval=200_000, key="price_refresh")
+
+if "last_push_ts" not in st.session_state:
+    st.session_state.last_push_ts = None
 
 # -----------------------------------
 # HELPERS
 # -----------------------------------
 
 DELTA_API = "https://api.india.delta.exchange/v2/tickers"
+
+# -----------------------------------
+# GITHUB CONFIG
+# -----------------------------------
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+CRYPTO_REPO = "nileshipad4-dotcom/crypto-streamlit-app"
+GITHUB_BRANCH = "main"
+GITHUB_API = "https://api.github.com"
+
 
 @st.cache_data(ttl=5)
 def get_delta_price(symbol):
@@ -145,6 +158,39 @@ def process_windows(df):
 
     return pd.DataFrame(rows)
 
+import base64
+from io import StringIO
+
+def append_csv_to_github(path, new_df, commit_msg):
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    r = requests.get(url, headers=headers)
+
+    if r.status_code == 200:
+        content = base64.b64decode(r.json()["content"]).decode()
+        sha = r.json()["sha"]
+        old_df = pd.read_csv(StringIO(content))
+        final_df = pd.concat([old_df, new_df], ignore_index=True)
+    else:
+        final_df = new_df
+        sha = None
+
+    csv_text = final_df.to_csv(index=False)
+
+    payload = {
+        "message": commit_msg,
+        "content": base64.b64encode(csv_text.encode()).decode(),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
 
 # -----------------------------------
 # HIGHLIGHTING
@@ -218,6 +264,9 @@ p2.metric(
 
 expiries = get_available_expiries()
 expiry = st.selectbox("Select Expiry", expiries, index=len(expiries) - 1)
+
+push_to_github = st.toggle("📤 Push OI window data to GitHub CSV", value=False)
+
 
 st.divider()
 
@@ -296,3 +345,37 @@ if not eth.empty:
     a.markdown(f"**△ CE:** <span style='color:{c(d_ce)}'>{d_ce}</span>", unsafe_allow_html=True)
     b.markdown(f"**△ PE:** <span style='color:{c(d_pe)}'>{d_pe}</span>", unsafe_allow_html=True)
     c3.markdown(f"**△ (CE − PE):** <span style='color:{c(d_diff)}'>{d_diff}</span>", unsafe_allow_html=True)
+
+now_ts = datetime.utcnow().strftime("%H:%M")
+
+if push_to_github and st.session_state.last_push_ts != now_ts:
+
+    update_msgs = []
+
+    if not btc.empty:
+        btc_out = btc.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
+        btc_out["timestamp_IST"] = now_ts
+
+        append_csv_to_github(
+            path=f"data/BTC_OI_WINDOWS.csv",
+            new_df=btc_out,
+            commit_msg=f"BTC OI window @ {now_ts} IST"
+        )
+        update_msgs.append(f"✅ BTC OI window data pushed at {now_ts} IST")
+
+    if not eth.empty:
+        eth_out = eth.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
+        eth_out["timestamp_IST"] = now_ts
+
+        append_csv_to_github(
+            path=f"data/ETH_OI_WINDOWS.csv",
+            new_df=eth_out,
+            commit_msg=f"ETH OI window @ {now_ts} IST"
+        )
+        update_msgs.append(f"✅ ETH OI window data pushed at {now_ts} IST")
+
+    st.session_state.last_push_ts = now_ts
+
+    for msg in update_msgs:
+        st.success(msg)
+
