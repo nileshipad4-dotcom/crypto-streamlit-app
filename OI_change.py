@@ -486,22 +486,60 @@ if push_to_github and st.session_state.last_push_ts != now_ts:
 
     update_msgs = []
 
+    if not btc.empty:
+        btc_out = btc.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
+        btc_out["timestamp_IST"] = now_ts
+
+        append_csv_to_github(
+            path=f"data/BTC_{expiry}.csv",
+            new_df=btc_out,
+            commit_msg=f"BTC OI window @ {now_ts} IST"
+        )
+
+    if not eth.empty:
+        eth_out = eth.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
+        eth_out["timestamp_IST"] = now_ts
+
+        append_csv_to_github(
+            path=f"data/ETH_{expiry}.csv",
+            new_df=eth_out,
+            commit_msg=f"ETH OI window @ {now_ts} IST"
+        )
+
+    st.session_state.last_push_ts = now_ts
+def get_ist_hhmm():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+
+now_ts = get_ist_hhmm()
+
+if push_to_github and st.session_state.last_push_ts != now_ts:
+
+    update_msgs = []
+
     for underlying in ["BTC", "ETH"]:
 
+        # 🔹 FETCH RAW OPTION CHAIN (PER STRIKE)
         df_live = fetch_live_collector_data(underlying, expiry)
+
         if df_live.empty:
             continue
 
+        # 🔹 COMPUTE MAX PAIN
         df_live = compute_max_pain_collector(df_live)
+
+        # 🔹 FORCE EXACT COLUMN ORDER
         df_live = df_live.reindex(columns=CANONICAL_COLS)
 
+        # 🔹 APPEND (NEVER OVERWRITE)
         append_csv_to_github(
             path=f"data/{underlying}_{expiry}.csv",
             new_df=df_live,
             commit_msg=f"{underlying} snapshot @ {now_ts} IST"
         )
 
-        update_msgs.append(f"✅ {underlying} snapshot pushed @ {now_ts} IST")
+        update_msgs.append(
+            f"✅ {underlying} collector snapshot pushed @ {now_ts} IST"
+        )
 
     st.session_state.last_push_ts = now_ts
 
