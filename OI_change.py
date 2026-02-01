@@ -18,10 +18,13 @@ BINANCE_API = "https://api.binance.com/api/v3/ticker/price"
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 
 # Auto refresh every 5 seconds
-st_autorefresh(interval=240_000, key="price_refresh")
+st_autorefresh(interval=100_000, key="price_refresh")
 
 if "last_push_ts" not in st.session_state:
     st.session_state.last_push_ts = None
+
+if "last_push_min_bucket" not in st.session_state:
+    st.session_state.last_push_min_bucket = None
 
 # -----------------------------------
 # HELPERS
@@ -503,9 +506,18 @@ CANONICAL_COLS = [
 ]
 
 
-now_ts = get_ist_hhmm()
+now_dt = datetime.utcnow() + timedelta(hours=5, minutes=30)
+now_ts = now_dt.strftime("%H:%M")
 
-if push_to_github and st.session_state.last_push_ts != now_ts:
+# 🔒 4-minute bucket (00,04,08,12,...)
+push_bucket = (now_dt.hour * 60 + now_dt.minute) // 4
+
+
+if (
+    push_to_github
+    and st.session_state.last_push_min_bucket != push_bucket
+):
+
 
     update_msgs = []
 
@@ -530,6 +542,8 @@ if push_to_github and st.session_state.last_push_ts != now_ts:
             f"✅ {underlying} collector snapshot pushed @ {now_ts} IST"
         )
 
+
+    st.session_state.last_push_min_bucket = push_bucket
     st.session_state.last_push_ts = now_ts
 
     for msg in update_msgs:
