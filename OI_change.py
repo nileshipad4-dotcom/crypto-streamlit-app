@@ -385,7 +385,6 @@ if not eth.empty:
 def get_ist_hhmm():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
-@st.cache_data(ttl=15)
 def fetch_live_collector_data(underlying, expiry):
     url = (
         f"{DELTA_API}"
@@ -443,13 +442,19 @@ def fetch_live_collector_data(underlying, expiry):
     }).drop(columns=["contract_type"])
 
     merged = pd.merge(calls, puts, on="strike_price", how="outer")
-    merged = merged.sort_values("strike_price").reset_index(drop=True)
+
+    merged = merged[[
+        "call_mark","call_oi","call_volume",
+        "call_gamma","call_delta","call_vega",
+        "strike_price",
+        "put_gamma","put_delta","put_vega",
+        "put_volume","put_oi","put_mark",
+    ]]
 
     merged["Expiry"] = expiry
     merged["timestamp_IST"] = get_ist_hhmm()
 
     return merged
-
 
 def compute_max_pain_collector(df):
     A = df["call_mark"].fillna(0).values
