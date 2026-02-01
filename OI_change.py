@@ -93,11 +93,21 @@ def process_windows(df):
         m["CE"] = m["call_oi_2"] - m["call_oi_1"]
         m["PE"] = m["put_oi_2"] - m["put_oi_1"]
 
-        ce = m.sort_values("CE", ascending=False)
-        pe = m.sort_values("PE", ascending=False)
+        ce = (
+            m.sort_values("CE", ascending=False)
+             .drop_duplicates("strike_price")
+        )
+        pe = (
+            m.sort_values("PE", ascending=False)
+             .drop_duplicates("strike_price")
+        )
 
-        sum_ce = int(m["CE"].sum())
-        sum_pe = int(m["PE"].sum())
+        if len(ce) < 2 or len(pe) < 2:
+            continue
+
+        # ---- scaled sums ----
+        sum_ce = int(m["CE"].sum() / 100)
+        sum_pe = int(m["PE"].sum() / 100)
         diff_ce_pe = sum_ce - sum_pe
 
         rows.append({
