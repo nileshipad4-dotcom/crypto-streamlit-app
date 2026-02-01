@@ -389,10 +389,11 @@ if push_to_github and st.session_state.last_push_ts != now_ts:
         btc_out["timestamp_IST"] = now_ts
 
         append_csv_to_github(
-            path=f"data/BTC_OI_WINDOWS.csv",
+            path=f"data/BTC_{expiry}.csv",
             new_df=btc_out,
             commit_msg=f"BTC OI window @ {now_ts} IST"
         )
+
         update_msgs.append(f"✅ BTC OI window data pushed at {now_ts} IST")
 
     if not eth.empty:
@@ -400,10 +401,11 @@ if push_to_github and st.session_state.last_push_ts != now_ts:
         eth_out["timestamp_IST"] = now_ts
 
         append_csv_to_github(
-            path=f"data/ETH_OI_WINDOWS.csv",
+            path=f"data/ETH_{expiry}.csv",
             new_df=eth_out,
             commit_msg=f"ETH OI window @ {now_ts} IST"
         )
+
         update_msgs.append(f"✅ ETH OI window data pushed at {now_ts} IST")
 
     st.session_state.last_push_ts = now_ts
