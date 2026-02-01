@@ -101,65 +101,80 @@ def build_all_windows(df):
     return windows
 
 
+def build_row(df, t1, t2, is_live=False):
+    d1 = df[df["timestamp_IST"] == t1]
+    d2 = df[df["timestamp_IST"] == t2]
+
+    if d1.empty or d2.empty:
+        return None
+
+    m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
+
+    strikes = sorted(m["strike_price"].unique())
+    if len(strikes) <= 4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
+
+    m["CE"] = m["call_oi_2"] - m["call_oi_1"]
+    m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+
+    ce = m.sort_values("CE", ascending=False)
+    pe = m.sort_values("PE", ascending=False)
+
+    if len(ce) < 2 or len(pe) < 2:
+        return None
+
+    sum_ce = int(m["CE"].sum() / 100)
+    sum_pe = int(m["PE"].sum() / 100)
+    diff = sum_ce - sum_pe
+
+    label = f"{t1:%H:%M} - {t2:%H:%M}"
+    if is_live:
+        label += " ⏳"
+
+    return {
+        "TIME": label,
+        "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
+        "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
+        "Σ ΔCE OI": sum_ce,
+        "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
+        "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
+        "Σ ΔPE OI": sum_pe,
+        "Δ (CE − PE)": diff,
+        "_ce1": ce.iloc[0].CE,
+        "_ce2": ce.iloc[1].CE,
+        "_pe1": pe.iloc[0].PE,
+        "_pe2": pe.iloc[1].PE,
+        "_is_live": is_live,
+    }
+
 def process_windows(df):
     rows = []
 
-    for t1, t2 in build_all_windows(df):
-        d1 = df[df["timestamp_IST"] == t1]
-        d2 = df[df["timestamp_IST"] == t2]
+    windows = build_all_windows(df)
 
-        m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
+    # ---- FIXED WINDOWS ----
+    for t1, t2 in windows:
+        row = build_row(df, t1, t2, is_live=False)
+        if row:
+            rows.append(row)
 
-        # ---- remove top 2 & bottom 2 strikes ----
-        strikes = sorted(m["strike_price"].unique())
-        if len(strikes) <= 4:
-            continue
-        m = m[m["strike_price"].isin(strikes[2:-2])]
+    # ---- LIVE WINDOW (rolling) ----
+    if windows:
+        live_start = windows[-1][1]   # last fixed end
+    else:
+        live_start = df["timestamp_IST"].min()
 
-        # ---- deltas ----
-        m["CE"] = m["call_oi_2"] - m["call_oi_1"]
-        m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+    live_end = df["timestamp_IST"].max()
 
-        ce = (
-            m.sort_values("CE", ascending=False)
-             .drop_duplicates("strike_price")
-        )
-        pe = (
-            m.sort_values("PE", ascending=False)
-             .drop_duplicates("strike_price")
-        )
-
-        if len(ce) < 2 or len(pe) < 2:
-            continue
-
-        # ---- scaled sums ----
-        sum_ce = int(m["CE"].sum() / 100)
-        sum_pe = int(m["PE"].sum() / 100)
-        diff_ce_pe = sum_ce - sum_pe
-
-        rows.append({
-            "TIME": f"{t1:%H:%M} - {t2:%H:%M}",
-
-            "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
-            "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
-            "Σ ΔCE OI": sum_ce,
-
-            "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
-            "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
-            "Σ ΔPE OI": sum_pe,
-
-            "Δ (CE − PE)": diff_ce_pe,
-
-            "_ce1": ce.iloc[0].CE,
-            "_ce2": ce.iloc[1].CE,
-            "_pe1": pe.iloc[0].PE,
-            "_pe2": pe.iloc[1].PE,
-        })
+    if live_end > live_start:
+        row = build_row(df, live_start, live_end, is_live=True)
+        if row:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
-import base64
-from io import StringIO
+
 
 def append_csv_to_github(path, new_df, commit_msg):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
