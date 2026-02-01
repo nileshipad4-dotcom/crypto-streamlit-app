@@ -31,31 +31,6 @@ if "last_push_ts" not in st.session_state:
 # -------------------------------------------------
 # AUTO PUSH LIVE SNAPSHOTS TO GITHUB (ON REFRESH)
 # -------------------------------------------------
-now_ts = get_ist_hhmm()
-
-if st.session_state.last_push_ts != now_ts:
-
-    expiry_to_use = get_expiries()[0]  # nearest valid expiry
-
-    for underlying in ["BTC", "ETH"]:
-        df_live = collect_live_snapshot(underlying, expiry_to_use)
-
-        if df_live is None or df_live.empty:
-            continue
-
-        csv_text = df_live.to_csv(index=False)
-
-        github_path = f"data/{underlying}_{expiry_to_use}.csv"
-        commit_msg = f"{underlying} snapshot @ {now_ts} IST"
-
-        push_csv_to_github(
-            path=github_path,
-            csv_text=csv_text,
-            commit_msg=commit_msg
-        )
-
-    st.session_state.last_push_ts = now_ts
-
 
 # -------------------------------------------------
 # CONSTANTS
@@ -276,6 +251,28 @@ def fetch_live_collector_data(underlying, expiry):
 
     return merged
 
+
+
+
+def compute_max_pain_collector(df):
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
+    for i in range(len(df)):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        mp.append(round((q + r + s + t) / 10000))
+
+    df["max_pain"] = mp
+    return df
+
+
 def push_csv_to_github(path, csv_text, commit_msg):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
 
@@ -311,23 +308,32 @@ def collect_live_snapshot(underlying, expiry):
     return df
 
 
-def compute_max_pain_collector(df):
-    A = df["call_mark"].fillna(0).values
-    B = df["call_oi"].fillna(0).values
-    G = df["strike_price"].values
-    L = df["put_oi"].fillna(0).values
-    M = df["put_mark"].fillna(0).values
 
-    mp = []
-    for i in range(len(df)):
-        q = -sum(A[i:] * B[i:])
-        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
-        s = -sum(M[:i] * L[:i])
-        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
-        mp.append(round((q + r + s + t) / 10000))
+now_ts = get_ist_hhmm()
 
-    df["max_pain"] = mp
-    return df
+if st.session_state.last_push_ts != now_ts:
+
+    expiry_to_use = get_expiries()[0]  # nearest valid expiry
+
+    for underlying in ["BTC", "ETH"]:
+        df_live = collect_live_snapshot(underlying, expiry_to_use)
+
+        if df_live is None or df_live.empty:
+            continue
+
+        csv_text = df_live.to_csv(index=False)
+
+        github_path = f"data/{underlying}_{expiry_to_use}.csv"
+        commit_msg = f"{underlying} snapshot @ {now_ts} IST"
+
+        push_csv_to_github(
+            path=github_path,
+            csv_text=csv_text,
+            commit_msg=commit_msg
+        )
+
+    st.session_state.last_push_ts = now_ts
+
 
 # ==========================================
 # OI Weighted Strike Range Settings
