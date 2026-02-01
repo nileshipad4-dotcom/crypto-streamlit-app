@@ -97,7 +97,7 @@ def load_data(symbol, expiry):
     return df
 
 
-def build_all_windows(df):
+def build_all_windows(df, min_gap_minutes):
     times = (
         df.sort_values("_row")
         .drop_duplicates("timestamp_IST")["timestamp_IST"]
@@ -107,7 +107,8 @@ def build_all_windows(df):
     windows, i = [], 0
     while i < len(times) - 1:
         t1 = times[i]
-        target = t1 + timedelta(minutes=MIN_GAP_MINUTES)
+        target = t1 + timedelta(minutes=min_gap_minutes)
+
 
         t2 = next((t for t in times[i + 1:] if t >= target), None)
         if t2 is None:
@@ -169,7 +170,8 @@ def build_row(df, t1, t2, is_live=False):
 def process_windows(df):
     rows = []
 
-    windows = build_all_windows(df)
+    windows = build_all_windows(df, min_gap_minutes)
+
 
     # ---- FIXED WINDOWS ----
     for t1, t2 in windows:
@@ -296,7 +298,22 @@ p2.metric(
 
 
 expiries = get_available_expiries()
-expiry = st.selectbox("Select Expiry", expiries, index=len(expiries) - 1)
+
+c_exp, c_gap = st.columns([2, 1])
+
+with c_exp:
+    expiry = st.selectbox(
+        "Select Expiry",
+        expiries,
+        index=len(expiries) - 1
+    )
+
+with c_gap:
+    min_gap_minutes = st.selectbox(
+        "Min Gap (minutes)",
+        options=[5, 10, 15, 20, 30, 45, 60],
+        index=2  # default = 15
+    )
 
 push_to_github = st.toggle("📤 Push OI window data to GitHub CSV", value=False)
 
