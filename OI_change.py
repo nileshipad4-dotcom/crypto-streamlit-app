@@ -18,7 +18,7 @@ BINANCE_API = "https://api.binance.com/api/v3/ticker/price"
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 
 # Auto refresh every 5 seconds
-st_autorefresh(interval=200_000, key="price_refresh")
+st_autorefresh(interval=240_000, key="price_refresh")
 
 if "last_push_ts" not in st.session_state:
     st.session_state.last_push_ts = None
