@@ -7,6 +7,8 @@ import calendar
 import os
 from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
+import base64
+
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -21,6 +23,41 @@ if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
 
 # -------------------------------------------------
+# SESSION STATE INIT (GITHUB PUSH CONTROL)
+# -------------------------------------------------
+if "last_push_ts" not in st.session_state:
+    st.session_state.last_push_ts = None
+
+# -------------------------------------------------
+# AUTO PUSH LIVE SNAPSHOTS TO GITHUB (ON REFRESH)
+# -------------------------------------------------
+now_ts = get_ist_hhmm()
+
+if st.session_state.last_push_ts != now_ts:
+
+    expiry_to_use = get_expiries()[0]  # nearest valid expiry
+
+    for underlying in ["BTC", "ETH"]:
+        df_live = collect_live_snapshot(underlying, expiry_to_use)
+
+        if df_live is None or df_live.empty:
+            continue
+
+        csv_text = df_live.to_csv(index=False)
+
+        github_path = f"data/{underlying}_{expiry_to_use}.csv"
+        commit_msg = f"{underlying} snapshot @ {now_ts} IST"
+
+        push_csv_to_github(
+            path=github_path,
+            csv_text=csv_text,
+            commit_msg=commit_msg
+        )
+
+    st.session_state.last_push_ts = now_ts
+
+
+# -------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------
 API_BASE = "https://api.india.delta.exchange/v2/tickers"
@@ -30,6 +67,12 @@ BASE_RAW_URL = (
     "nileshipad4-dotcom/crypto-streamlit-app/"
     "main/data/"
 )
+
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+CRYPTO_REPO = "nileshipad4-dotcom/crypto-streamlit-app"
+GITHUB_BRANCH = "main"
+GITHUB_API = "https://api.github.com"
+
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
@@ -232,6 +275,40 @@ def fetch_live_collector_data(underlying, expiry):
     merged["Expiry"] = expiry
 
     return merged
+
+def push_csv_to_github(path, csv_text, commit_msg):
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
+
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    # check if file exists
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+
+    payload = {
+        "message": commit_msg,
+        "content": base64.b64encode(csv_text.encode()).decode(),
+        "branch": GITHUB_BRANCH,
+    }
+
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
+def collect_live_snapshot(underlying, expiry):
+    df = fetch_single_expiry(underlying, expiry)
+    if df.empty:
+        return None
+
+    ts = get_ist_hhmm()
+    df["timestamp_IST"] = ts
+    df = compute_max_pain(df)
+
+    return df
 
 
 def compute_max_pain_collector(df):
