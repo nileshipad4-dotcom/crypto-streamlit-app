@@ -47,31 +47,6 @@ def safe_ratio(a, b):
     except:
         return None
 
-@st.cache_data(ttl=60)
-def load_collector_data(underlying, expiry):
-    path = f"data/{underlying}_{expiry}.csv"
-    if not os.path.exists(path):
-        return pd.DataFrame()
-
-    df = pd.read_csv(path)
-
-    # Ensure correct dtypes
-    num_cols = [
-        "strike_price",
-        "call_mark", "call_oi", "call_volume",
-        "call_gamma", "call_delta", "call_vega",
-        "put_mark", "put_oi", "put_volume",
-        "put_gamma", "put_delta", "put_vega",
-        "max_pain",
-    ]
-
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    return df
-
-
 def extract_timestamps_from_local_csv(underlying, expiry):
     url = f"{BASE_RAW_URL}{underlying}_{expiry}.csv"
 
@@ -191,6 +166,91 @@ p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 if "ref_price" not in st.session_state:
     st.session_state.ref_price = float(prices[asset])
+
+
+@st.cache_data(ttl=15)
+def fetch_live_collector_data(underlying, expiry):
+    url = (
+        f"{API_BASE}"
+        f"?contract_types=call_options,put_options"
+        f"&underlying_asset_symbols={underlying}"
+        f"&expiry_date={expiry}"
+    )
+
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200:
+        return pd.DataFrame()
+
+    raw = r.json().get("result", [])
+    if not raw:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(raw)
+
+    df = df[
+        [
+            "strike_price", "contract_type",
+            "mark_price", "oi_contracts", "volume",
+            "greeks.gamma", "greeks.delta", "greeks.vega"
+        ]
+    ]
+
+    df.rename(columns={
+        "greeks.gamma": "gamma",
+        "greeks.delta": "delta",
+        "greeks.vega": "vega",
+    }, inplace=True)
+
+    for c in ["strike_price", "mark_price", "oi_contracts", "volume", "gamma", "delta", "vega"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    calls = df[df["contract_type"] == "call_options"].copy()
+    puts  = df[df["contract_type"] == "put_options"].copy()
+
+    calls = calls.rename(columns={
+        "mark_price": "call_mark",
+        "oi_contracts": "call_oi",
+        "volume": "call_volume",
+        "gamma": "call_gamma",
+        "delta": "call_delta",
+        "vega": "call_vega",
+    }).drop(columns=["contract_type"])
+
+    puts = puts.rename(columns={
+        "mark_price": "put_mark",
+        "oi_contracts": "put_oi",
+        "volume": "put_volume",
+        "gamma": "put_gamma",
+        "delta": "put_delta",
+        "vega": "put_vega",
+    }).drop(columns=["contract_type"])
+
+    merged = pd.merge(calls, puts, on="strike_price", how="outer")
+    merged = merged.sort_values("strike_price").reset_index(drop=True)
+
+    merged["timestamp_IST"] = get_ist_hhmm()
+    merged["Expiry"] = expiry
+
+    return merged
+
+
+def compute_max_pain_collector(df):
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
+    for i in range(len(df)):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        mp.append(round((q + r + s + t) / 10000))
+
+    df["max_pain"] = mp
+    return df
 
 # ==========================================
 # OI Weighted Strike Range Settings
@@ -509,41 +569,21 @@ pcr_df = pd.DataFrame(
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
 
-
-
 st.divider()
-st.subheader("📥 Raw Collector Data (as stored in CSV)")
+st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
 
 tab_btc, tab_eth = st.tabs(["BTC", "ETH"])
 
 for UNDERLYING, tab in zip(["BTC", "ETH"], [tab_btc, tab_eth]):
-
     with tab:
-        raw_df = load_collector_data(UNDERLYING, selected_expiry)
+        live_df = fetch_live_collector_data(UNDERLYING, selected_expiry)
 
-        if raw_df.empty:
-            st.warning(f"No raw data found for {UNDERLYING} {selected_expiry}")
+        if live_df.empty:
+            st.warning("Live data unavailable")
             continue
 
-        # Timestamp selector
-        timestamps = (
-            raw_df["timestamp_IST"]
-            .astype(str)
-            .dropna()
-            .unique()
-            .tolist()
-        )
+        live_df = compute_max_pain_collector(live_df)
 
-        selected_ts = st.selectbox(
-            "Select Timestamp",
-            timestamps,
-            index=len(timestamps) - 1,
-            key=f"raw_ts_{UNDERLYING}"
-        )
-
-        view_df = raw_df[raw_df["timestamp_IST"].astype(str) == selected_ts]
-
-        # Column order (same as collector output, plus MP)
         display_cols = [
             "strike_price",
 
@@ -558,9 +598,7 @@ for UNDERLYING, tab in zip(["BTC", "ETH"], [tab_btc, tab_eth]):
             "Expiry",
         ]
 
-        display_cols = [c for c in display_cols if c in view_df.columns]
-
         st.dataframe(
-            view_df[display_cols].sort_values("strike_price"),
+            live_df[display_cols],
             use_container_width=True
         )
