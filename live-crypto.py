@@ -8,6 +8,8 @@ import os
 from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
 import base64
+from io import StringIO
+
 
 
 
@@ -281,7 +283,8 @@ def append_csv_to_github(path, new_df, commit_msg):
         content = base64.b64decode(r.json()["content"]).decode()
         sha = r.json()["sha"]
 
-        old_df = pd.read_csv(pd.compat.StringIO(content))
+        old_df = pd.read_csv(StringIO(content))
+
         final_df = pd.concat([old_df, new_df], ignore_index=True)
 
     else:
