@@ -199,9 +199,66 @@ st.subheader("BTC")
 btc = process_windows(load_data("BTC", expiry))
 st.dataframe(highlight_table(btc), use_container_width=True)
 
+# -------- BTC WINDOW DELTA --------
+st.subheader("BTC — Window Delta Comparison")
+
+if not btc.empty:
+    btc_times = btc["TIME"].tolist()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        btc_from = st.selectbox("From Time (BTC)", btc_times, index=0, key="btc_from")
+    with col2:
+        btc_to = st.selectbox("To Time (BTC)", btc_times, index=len(btc_times)-1, key="btc_to")
+
+    if btc_from != btc_to:
+        r1 = btc[btc["TIME"] == btc_from].iloc[0]
+        r2 = btc[btc["TIME"] == btc_to].iloc[0]
+
+        d_ce = r2["Σ ΔCE OI"] - r1["Σ ΔCE OI"]
+        d_pe = r2["Σ ΔPE OI"] - r1["Σ ΔPE OI"]
+        d_diff = r2["Δ (CE − PE)"] - r1["Δ (CE − PE)"]
+
+        def c(v): 
+            return "red" if v > 0 else "green" if v < 0 else "black"
+
+        a, b, c3 = st.columns(3)
+        a.markdown(f"**△ CE:** <span style='color:{c(d_ce)}'>{d_ce}</span>", unsafe_allow_html=True)
+        b.markdown(f"**△ PE:** <span style='color:{c(d_pe)}'>{d_pe}</span>", unsafe_allow_html=True)
+        c3.markdown(f"**△ (CE − PE):** <span style='color:{c(d_diff)}'>{d_diff}</span>", unsafe_allow_html=True)
+
 st.divider()
 
 # -------- ETH TABLE --------
 st.subheader("ETH")
 eth = process_windows(load_data("ETH", expiry))
 st.dataframe(highlight_table(eth), use_container_width=True)
+
+# -------- ETH WINDOW DELTA --------
+st.subheader("ETH — Window Delta Comparison")
+
+if not eth.empty:
+    eth_times = eth["TIME"].tolist()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        eth_from = st.selectbox("From Time (ETH)", eth_times, index=0, key="eth_from")
+    with col2:
+        eth_to = st.selectbox("To Time (ETH)", eth_times, index=len(eth_times)-1, key="eth_to")
+
+    if eth_from != eth_to:
+        r1 = eth[eth["TIME"] == eth_from].iloc[0]
+        r2 = eth[eth["TIME"] == eth_to].iloc[0]
+
+        d_ce = r2["Σ ΔCE OI"] - r1["Σ ΔCE OI"]
+        d_pe = r2["Σ ΔPE OI"] - r1["Σ ΔPE OI"]
+        d_diff = r2["Δ (CE − PE)"] - r1["Δ (CE − PE)"]
+
+        def c(v): 
+            return "red" if v > 0 else "green" if v < 0 else "black"
+
+        a, b, c3 = st.columns(3)
+        a.markdown(f"**△ CE:** <span style='color:{c(d_ce)}'>{d_ce}</span>", unsafe_allow_html=True)
+        b.markdown(f"**△ PE:** <span style='color:{c(d_pe)}'>{d_pe}</span>", unsafe_allow_html=True)
+        c3.markdown(f"**△ (CE − PE):** <span style='color:{c(d_diff)}'>{d_diff}</span>", unsafe_allow_html=True)
+
