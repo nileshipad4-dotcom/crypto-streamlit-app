@@ -572,9 +572,6 @@ st.dataframe(pcr_df.round(3), use_container_width=True)
 st.divider()
 st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
 
-st.divider()
-st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
-
 # ---------- BTC ----------
 st.markdown("### 🟠 BTC")
 
