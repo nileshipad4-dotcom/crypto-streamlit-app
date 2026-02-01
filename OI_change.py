@@ -148,7 +148,7 @@ def build_row(df, t1, t2, is_live=False):
 
     sum_ce = int(m["CE"].sum() / 100)
     sum_pe = int(m["PE"].sum() / 100)
-    diff = sum_ce - sum_pe
+    diff = - sum_ce + sum_pe
 
     label = f"{t1:%H:%M} - {t2:%H:%M}"
     if is_live:
@@ -162,7 +162,7 @@ def build_row(df, t1, t2, is_live=False):
         "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
         "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
         "Σ ΔPE OI": sum_pe,
-        "Δ (CE − PE)": diff,
+        "Δ (PE − CE)": diff,
         "_ce1": ce.iloc[0].CE,
         "_ce2": ce.iloc[1].CE,
         "_pe1": pe.iloc[0].PE,
@@ -238,7 +238,7 @@ def highlight_table(df):
         "TIME",
         "MAX CE 1", "MAX CE 2", "Σ ΔCE OI",
         "MAX PE 1", "MAX PE 2", "Σ ΔPE OI",
-        "Δ (CE − PE)",
+        "Δ (PE − CE)",
     ]
 
     styles = pd.DataFrame("", index=df.index, columns=display_cols)
@@ -257,13 +257,13 @@ def highlight_table(df):
 
         for i, v in vals.items():
             if v == top1:
-                styles.loc[i, col] = "background-color:#ff4d4d;color:white;font-weight:bold"
+                styles.loc[i, col] = "background-color:#ffa500;color:white;font-weight:bold"
             elif v == top2:
-                styles.loc[i, col] = "background-color:#ffa500;font-weight:bold"
+                styles.loc[i, col] = "background-color:#ff4d4d;font-weight:bold"
 
     # ---- SUM COLOR LOGIC (TEXT ONLY) ----
     for i in df.index:
-        diff = df.loc[i, "Δ (CE − PE)"]
+        diff = df.loc[i, "Δ (PE − CE)"]
         if diff > 0:
             color = "red"
         elif diff < 0:
@@ -273,7 +273,7 @@ def highlight_table(df):
 
         styles.loc[i, "Σ ΔCE OI"] = f"color:{color};font-weight:bold"
         styles.loc[i, "Σ ΔPE OI"] = f"color:{color};font-weight:bold"
-        styles.loc[i, "Δ (CE − PE)"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Δ (PE − CE)"] = f"color:{color};font-weight:bold"
 
     return df[display_cols].style.apply(lambda _: styles, axis=None)
 
@@ -350,7 +350,7 @@ if not btc.empty:
 
     d_ce = int(slice_df["Σ ΔCE OI"].sum())
     d_pe = int(slice_df["Σ ΔPE OI"].sum())
-    d_diff = int(slice_df["Δ (CE − PE)"].sum())
+    d_diff = int(slice_df["Δ (PE − CE)"].sum())
 
     def c(v):
         return "red" if v > 0 else "green" if v < 0 else "black"
@@ -389,7 +389,7 @@ if not eth.empty:
 
     d_ce = int(slice_df["Σ ΔCE OI"].sum())
     d_pe = int(slice_df["Σ ΔPE OI"].sum())
-    d_diff = int(slice_df["Δ (CE − PE)"].sum())
+    d_diff = int(slice_df["Δ (PE − CE)"].sum())
 
     def c(v):
         return "red" if v > 0 else "green" if v < 0 else "black"
