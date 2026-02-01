@@ -92,15 +92,16 @@ def extract_timestamps_from_local_csv(underlying, expiry):
         st.error("timestamp_IST column missing in CSV")
         return []
 
-    df["timestamp_IST"] = pd.to_datetime(df["timestamp_IST"], errors="coerce")
+    df["timestamp_IST"] = df["timestamp_IST"].astype(str).str[:5]
+
 
     times = (
         df["timestamp_IST"]
         .dropna()
-        .dt.strftime("%H:%M")
         .unique()
         .tolist()
     )
+
 
     if len(times) < 2:
         st.error("CSV loaded but timestamps < 2")
