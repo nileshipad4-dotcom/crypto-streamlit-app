@@ -307,6 +307,7 @@ def collect_live_snapshot(underlying, expiry):
 
 
 
+
 now_ts = get_ist_hhmm()
 
 if st.session_state.last_push_ts != now_ts:
