@@ -1,64 +1,62 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import timedelta, datetime
 import os
 
-# -------------------------------------------------
+# -----------------------------------
 # CONFIG
-# -------------------------------------------------
+# -----------------------------------
 DATA_DIR = "data"
 MIN_GAP_MINUTES = 15
-DELTA_API = "https://api.india.delta.exchange/v2/tickers"
+BINANCE_API = "https://api.binance.com/api/v3/ticker/price"
 
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
-st.title("📊 BTC & ETH — OI Time Window Scanner")
 
-# -------------------------------------------------
-# LIVE PRICE (DELTA EXCHANGE — STABLE)
-# -------------------------------------------------
-@st.cache_data(ttl=10)
-def get_delta_price(symbol):
-    r = requests.get(DELTA_API, timeout=10).json()["result"]
-    return float(next(x for x in r if x["symbol"] == f"{symbol}USD")["mark_price"])
-
-
-# -------------------------------------------------
+# -----------------------------------
 # HELPERS
-# -------------------------------------------------
+# -----------------------------------
+def get_binance_price(symbol):
+    try:
+        r = requests.get(BINANCE_API, params={"symbol": symbol}, timeout=5)
+        return float(r.json()["price"])
+    except:
+        return None
+
+
 def get_available_expiries():
-    if not os.path.exists(DATA_DIR):
-        return []
     files = [f for f in os.listdir(DATA_DIR) if f.endswith(".csv")]
     expiries = sorted(
         list(set(f.split("_")[1].replace(".csv", "") for f in files)),
-        key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y")
     )
     return expiries
 
 
 def load_data(symbol, expiry):
-    df = pd.read_csv(f"{DATA_DIR}/{symbol}_{expiry}.csv")
-    df["_row"] = range(len(df))  # preserve CSV order
+    path = f"{DATA_DIR}/{symbol}_{expiry}.csv"
+    df = pd.read_csv(path)
+    df["_row_order"] = range(len(df))  # preserve CSV order
     df["timestamp_IST"] = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
     return df
 
 
-def build_windows(df):
+def build_all_windows(df):
     times = (
-        df.sort_values("_row")
-        .drop_duplicates("timestamp_IST")["timestamp_IST"]
-        .tolist()
+        df.sort_values("_row_order")
+          .drop_duplicates("timestamp_IST")["timestamp_IST"]
+          .tolist()
     )
 
     windows = []
     i = 0
+
     while i < len(times) - 1:
         t1 = times[i]
         target = t1 + timedelta(minutes=MIN_GAP_MINUTES)
 
         t2 = None
-        for t in times[i + 1 :]:
+        for t in times[i + 1:]:
             if t >= target:
                 t2 = t
                 break
@@ -72,101 +70,111 @@ def build_windows(df):
     return windows
 
 
-def process(df):
+def process_windows(df):
     rows = []
+    windows = build_all_windows(df)
 
-    for t1, t2 in build_windows(df):
-        d1 = df[df["timestamp_IST"] == t1]
-        d2 = df[df["timestamp_IST"] == t2]
+    for t1, t2 in windows:
+        df1 = df[df["timestamp_IST"] == t1]
+        df2 = df[df["timestamp_IST"] == t2]
 
-        m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
-        m["CE"] = m["call_oi_2"] - m["call_oi_1"]
-        m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+        merged = pd.merge(
+            df1, df2,
+            on="strike_price",
+            suffixes=("_t1", "_t2")
+        )
 
-        ce = m.sort_values("CE", ascending=False)
-        pe = m.sort_values("PE", ascending=False)
+        # -----------------------------------
+        # REMOVE TOP 2 & BOTTOM 2 STRIKES
+        # -----------------------------------
+        strikes = sorted(merged["strike_price"].unique())
+
+        if len(strikes) <= 4:
+            continue  # not enough strikes to filter
+
+        valid_strikes = strikes[2:-2]
+        merged = merged[merged["strike_price"].isin(valid_strikes)]
+
+        # -----------------------------------
+        # OI CHANGES
+        # -----------------------------------
+        merged["CE_CHANGE"] = merged["call_oi_t2"] - merged["call_oi_t1"]
+        merged["PE_CHANGE"] = merged["put_oi_t2"] - merged["put_oi_t1"]
+
+        ce = merged.sort_values("CE_CHANGE", ascending=False)
+        pe = merged.sort_values("PE_CHANGE", ascending=False)
+
+        if len(ce) < 2 or len(pe) < 2:
+            continue
 
         rows.append({
-            "TIME": f"{t1:%H:%M} - {t2:%H:%M}",
-            "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
-            "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
-            "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
-            "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
-            "_ce1": ce.iloc[0].CE,
-            "_ce2": ce.iloc[1].CE,
-            "_pe1": pe.iloc[0].PE,
-            "_pe2": pe.iloc[1].PE,
+            "TIME": f"{t1.strftime('%H:%M')} - {t2.strftime('%H:%M')}",
+            "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE_CHANGE)}",
+            "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE_CHANGE)}",
+            "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE_CHANGE)}",
+            "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE_CHANGE)}",
+            "_ce1": ce.iloc[0].CE_CHANGE,
+            "_ce2": ce.iloc[1].CE_CHANGE,
+            "_pe1": pe.iloc[0].PE_CHANGE,
+            "_pe2": pe.iloc[1].PE_CHANGE,
         })
 
     return pd.DataFrame(rows)
 
 
-# -------------------------------------------------
-# HIGHLIGHTING — COLUMN-WISE (CORRECT)
-# -------------------------------------------------
-def highlight(df):
-    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+def highlight_table(df):
+    numeric_cols = ["_ce1", "_ce2", "_pe1", "_pe2"]
+    values = df[numeric_cols].abs().values.flatten()
+    max1, max2 = sorted(values, reverse=True)[:2]
 
-    for col, num_col in [
-        ("MAX CE 1", "_ce1"),
-        ("MAX CE 2", "_ce2"),
-        ("MAX PE 1", "_pe1"),
-        ("MAX PE 2", "_pe2"),
-    ]:
-        vals = df[num_col].abs()
-        top1, top2 = vals.nlargest(2).values
-
-        for i, v in vals.items():
-            if v == top1:
-                styles.loc[i, col] = "background-color:#ff4d4d;color:white;font-weight:bold"
-            elif v == top2:
-                styles.loc[i, col] = "background-color:#ffa500;font-weight:bold"
+    def style(val):
+        try:
+            num = int(val.split(":-")[1])
+            if abs(num) == max1:
+                return "background-color:#ff4d4d;color:white;font-weight:bold"
+            if abs(num) == max2:
+                return "background-color:#ffa500;font-weight:bold"
+        except:
+            pass
+        return ""
 
     display_cols = ["TIME", "MAX CE 1", "MAX CE 2", "MAX PE 1", "MAX PE 2"]
-    return df[display_cols].style.apply(lambda _: styles, axis=None)
+    return df[display_cols].style.applymap(style)
 
 
-# -------------------------------------------------
-# UI — PRICES
-# -------------------------------------------------
-p1, p2 = st.columns(2)
-p1.metric("BTC Price", f"{int(get_delta_price('BTC')):,}")
-p2.metric("ETH Price", f"{int(get_delta_price('ETH')):,}")
+# -----------------------------------
+# UI
+# -----------------------------------
+st.title("BTC & ETH OI Change Scanner")
 
-# -------------------------------------------------
-# EXPIRY SELECTOR (CRASH-SAFE)
-# -------------------------------------------------
+# Prices
+c1, c2 = st.columns(2)
+with c1:
+    st.metric("BTC Price", get_binance_price("BTCUSDT"))
+with c2:
+    st.metric("ETH Price", get_binance_price("ETHUSDT"))
+
+# Expiry selector
 expiries = get_available_expiries()
-
-if not expiries:
-    st.error("No CSV files found in /data folder")
-    st.stop()
-
-expiry = st.selectbox(
-    "Select Expiry",
-    expiries,
-    index=len(expiries) - 1  # ✅ SAFE DEFAULT (LATEST)
-)
+expiry = st.selectbox("Select Expiry", expiries, index=len(expiries) - 1)
 
 st.divider()
 
-# -------------------------------------------------
-# TABLES
-# -------------------------------------------------
-c1, c2 = st.columns(2)
+# Tables
+btc_col, eth_col = st.columns(2)
 
-with c1:
+with btc_col:
     st.subheader("BTC")
-    btc_df = process(load_data("BTC", expiry))
-    if btc_df.empty:
-        st.warning("Not enough BTC data")
+    btc_table = process_windows(load_data("BTC", expiry))
+    if btc_table.empty:
+        st.warning("Not enough data")
     else:
-        st.dataframe(highlight(btc_df), use_container_width=True)
+        st.dataframe(highlight_table(btc_table), use_container_width=True)
 
-with c2:
+with eth_col:
     st.subheader("ETH")
-    eth_df = process(load_data("ETH", expiry))
-    if eth_df.empty:
-        st.warning("Not enough ETH data")
+    eth_table = process_windows(load_data("ETH", expiry))
+    if eth_table.empty:
+        st.warning("Not enough data")
     else:
-        st.dataframe(highlight(eth_df), use_container_width=True)
+        st.dataframe(highlight_table(eth_table), use_container_width=True)
