@@ -54,6 +54,14 @@ CANONICAL_COLS = [
     "Expiry","timestamp_IST","max_pain"
 ]
 
+COLLECTOR_BASE_COLS = [
+    "call_mark","call_oi","call_volume",
+    "call_gamma","call_delta","call_vega",
+    "strike_price",
+    "put_gamma","put_delta","put_vega",
+    "put_volume","put_oi","put_mark"
+]
+
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
