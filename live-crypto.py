@@ -47,6 +47,31 @@ def safe_ratio(a, b):
     except:
         return None
 
+@st.cache_data(ttl=60)
+def load_collector_data(underlying, expiry):
+    path = f"data/{underlying}_{expiry}.csv"
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    df = pd.read_csv(path)
+
+    # Ensure correct dtypes
+    num_cols = [
+        "strike_price",
+        "call_mark", "call_oi", "call_volume",
+        "call_gamma", "call_delta", "call_vega",
+        "put_mark", "put_oi", "put_volume",
+        "put_gamma", "put_delta", "put_vega",
+        "max_pain",
+    ]
+
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    return df
+
+
 def extract_timestamps_from_local_csv(underlying, expiry):
     url = f"{BASE_RAW_URL}{underlying}_{expiry}.csv"
 
@@ -81,6 +106,8 @@ def extract_timestamps_from_local_csv(underlying, expiry):
         return (pivot - (h * 60 + m)) % 1440
 
     return sorted(times, key=sort_key)
+
+
 
 # -------------------------------------------------
 # EXPIRY LOGIC
@@ -481,3 +508,59 @@ pcr_df = pd.DataFrame(
 
 st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
+
+
+
+st.divider()
+st.subheader("📥 Raw Collector Data (as stored in CSV)")
+
+tab_btc, tab_eth = st.tabs(["BTC", "ETH"])
+
+for UNDERLYING, tab in zip(["BTC", "ETH"], [tab_btc, tab_eth]):
+
+    with tab:
+        raw_df = load_collector_data(UNDERLYING, selected_expiry)
+
+        if raw_df.empty:
+            st.warning(f"No raw data found for {UNDERLYING} {selected_expiry}")
+            continue
+
+        # Timestamp selector
+        timestamps = (
+            raw_df["timestamp_IST"]
+            .astype(str)
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        selected_ts = st.selectbox(
+            "Select Timestamp",
+            timestamps,
+            index=len(timestamps) - 1,
+            key=f"raw_ts_{UNDERLYING}"
+        )
+
+        view_df = raw_df[raw_df["timestamp_IST"].astype(str) == selected_ts]
+
+        # Column order (same as collector output, plus MP)
+        display_cols = [
+            "strike_price",
+
+            "call_mark", "call_oi", "call_volume",
+            "call_gamma", "call_delta", "call_vega",
+
+            "put_mark", "put_oi", "put_volume",
+            "put_gamma", "put_delta", "put_vega",
+
+            "max_pain",
+            "timestamp_IST",
+            "Expiry",
+        ]
+
+        display_cols = [c for c in display_cols if c in view_df.columns]
+
+        st.dataframe(
+            view_df[display_cols].sort_values("strike_price"),
+            use_container_width=True
+        )
