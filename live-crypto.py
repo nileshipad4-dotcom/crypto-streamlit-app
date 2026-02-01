@@ -572,33 +572,65 @@ st.dataframe(pcr_df.round(3), use_container_width=True)
 st.divider()
 st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
 
-tab_btc, tab_eth = st.tabs(["BTC", "ETH"])
+st.divider()
+st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
 
-for UNDERLYING, tab in zip(["BTC", "ETH"], [tab_btc, tab_eth]):
-    with tab:
-        live_df = fetch_live_collector_data(UNDERLYING, selected_expiry)
+# ---------- BTC ----------
+st.markdown("### 🟠 BTC")
 
-        if live_df.empty:
-            st.warning("Live data unavailable")
-            continue
+btc_live = fetch_live_collector_data("BTC", selected_expiry)
 
-        live_df = compute_max_pain_collector(live_df)
+if btc_live.empty:
+    st.warning("BTC live data unavailable")
+else:
+    btc_live = compute_max_pain_collector(btc_live)
 
-        display_cols = [
-            "strike_price",
+    btc_cols = [
+        "strike_price",
 
-            "call_mark", "call_oi", "call_volume",
-            "call_gamma", "call_delta", "call_vega",
+        "call_mark", "call_oi", "call_volume",
+        "call_gamma", "call_delta", "call_vega",
 
-            "put_mark", "put_oi", "put_volume",
-            "put_gamma", "put_delta", "put_vega",
+        "put_mark", "put_oi", "put_volume",
+        "put_gamma", "put_delta", "put_vega",
 
-            "max_pain",
-            "timestamp_IST",
-            "Expiry",
-        ]
+        "max_pain",
+        "timestamp_IST",
+        "Expiry",
+    ]
 
-        st.dataframe(
-            live_df[display_cols],
-            use_container_width=True
-        )
+    st.dataframe(
+        btc_live[btc_cols],
+        use_container_width=True
+    )
+
+st.divider()
+
+# ---------- ETH ----------
+st.markdown("### 🟣 ETH")
+
+eth_live = fetch_live_collector_data("ETH", selected_expiry)
+
+if eth_live.empty:
+    st.warning("ETH live data unavailable")
+else:
+    eth_live = compute_max_pain_collector(eth_live)
+
+    eth_cols = [
+        "strike_price",
+
+        "call_mark", "call_oi", "call_volume",
+        "call_gamma", "call_delta", "call_vega",
+
+        "put_mark", "put_oi", "put_volume",
+        "put_gamma", "put_delta", "put_vega",
+
+        "max_pain",
+        "timestamp_IST",
+        "Expiry",
+    ]
+
+    st.dataframe(
+        eth_live[eth_cols],
+        use_container_width=True
+    )
