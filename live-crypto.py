@@ -7,6 +7,10 @@ import calendar
 import os
 from datetime import datetime, timedelta, date
 from streamlit_autorefresh import st_autorefresh
+import base64
+
+
+
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -20,6 +24,9 @@ st.title("📊 Strike-wise Comparison + Live Snapshot")
 if st_autorefresh(interval=60_000, key="auto_refresh"):
     st.cache_data.clear()
 
+if "last_push_ts" not in st.session_state:
+    st.session_state.last_push_ts = None
+
 # -------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------
@@ -30,6 +37,11 @@ BASE_RAW_URL = (
     "nileshipad4-dotcom/crypto-streamlit-app/"
     "main/data/"
 )
+
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+CRYPTO_REPO = "nileshipad4-dotcom/crypto-streamlit-app"
+GITHUB_BRANCH = "main"
+GITHUB_API = "https://api.github.com"
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
@@ -248,6 +260,73 @@ p1.metric("BTC Price", f"{int(prices['BTC']):,}")
 p2.metric("ETH Price", f"{int(prices['ETH']):,}")
 if "ref_price" not in st.session_state:
     st.session_state.ref_price = float(prices[asset])
+
+
+def append_csv_to_github(path, new_df, commit_msg):
+    """
+    Appends new rows to an existing CSV on GitHub.
+    Creates file if it does not exist.
+    """
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    # 1️⃣ Check if file exists
+    r = requests.get(url, headers=headers)
+
+    if r.status_code == 200:
+        # File exists → append
+        content = base64.b64decode(r.json()["content"]).decode()
+        sha = r.json()["sha"]
+
+        old_df = pd.read_csv(pd.compat.StringIO(content))
+        final_df = pd.concat([old_df, new_df], ignore_index=True)
+
+    else:
+        # File does not exist → create new
+        final_df = new_df
+        sha = None
+
+    csv_text = final_df.to_csv(index=False)
+
+    payload = {
+        "message": commit_msg,
+        "content": base64.b64encode(csv_text.encode()).decode(),
+        "branch": GITHUB_BRANCH,
+    }
+
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
+now_ts = get_ist_hhmm()
+
+if st.session_state.last_push_ts != now_ts:
+
+    expiry_to_use = get_expiries()[0]  # nearest valid expiry
+
+    for underlying in ["BTC", "ETH"]:
+
+        df_live = fetch_live_collector_data(underlying, expiry_to_use)
+
+        if df_live.empty:
+            continue
+
+        df_live = compute_max_pain_collector(df_live)
+
+        github_path = f"data/{underlying}_{expiry_to_use}.csv"
+        commit_msg = f"{underlying} snapshot @ {now_ts} IST"
+
+        append_csv_to_github(
+            path=github_path,
+            new_df=df_live,
+            commit_msg=commit_msg
+        )
+
+    st.session_state.last_push_ts = now_ts
 
 # ==========================================
 # OI Weighted Strike Range Settings
