@@ -297,15 +297,13 @@ def push_csv_to_github(path, csv_text, commit_msg):
     requests.put(url, headers=headers, json=payload)
 
 def collect_live_snapshot(underlying, expiry):
-    df = fetch_single_expiry(underlying, expiry)
-    if df.empty:
+    df = fetch_live_collector_data(underlying, expiry)
+    if df is None or df.empty:
         return None
 
-    ts = get_ist_hhmm()
-    df["timestamp_IST"] = ts
-    df = compute_max_pain(df)
-
+    df = compute_max_pain_collector(df)
     return df
+
 
 
 
