@@ -165,12 +165,17 @@ def fetch_live_collector_data(underlying, expiry):
     }).drop(columns=["contract_type"])
 
     merged = pd.merge(calls, puts, on="strike_price", how="outer")
+    
+    # 🔒 FORCE COLLECTOR COLUMN ORDER (MATCHES collector.py)
+    merged = merged[COLLECTOR_BASE_COLS]
+    
     merged = merged.sort_values("strike_price").reset_index(drop=True)
-
-    merged["timestamp_IST"] = get_ist_hhmm()
+    
     merged["Expiry"] = expiry
-
+    merged["timestamp_IST"] = get_ist_hhmm()
+    
     return merged
+
 
 def compute_max_pain_collector(df):
     A = df["call_mark"].fillna(0).values
