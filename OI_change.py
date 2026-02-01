@@ -37,12 +37,12 @@ def load_data(symbol, expiry):
     df = pd.read_csv(f"{DATA_DIR}/{symbol}_{expiry}.csv")
     df["_row"] = range(len(df))
 
-    # ---- handle midnight rollover ----
-    raw_times = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
+    # ---- midnight rollover fix ----
+    raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
     base = datetime(2000, 1, 1)
     out, last, day = [], None, 0
 
-    for t in raw_times:
+    for t in raw:
         if last is not None and t < last:
             day += 1
         out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
@@ -55,8 +55,8 @@ def load_data(symbol, expiry):
 def build_all_windows(df):
     times = (
         df.sort_values("_row")
-          .drop_duplicates("timestamp_IST")["timestamp_IST"]
-          .tolist()
+        .drop_duplicates("timestamp_IST")["timestamp_IST"]
+        .tolist()
     )
 
     windows, i = [], 0
@@ -83,21 +83,18 @@ def process_windows(df):
 
         m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
 
-        # ---- remove top 2 & bottom 2 strikes ----
+        # remove top 2 & bottom 2 strikes
         strikes = sorted(m["strike_price"].unique())
         if len(strikes) <= 4:
             continue
-
         m = m[m["strike_price"].isin(strikes[2:-2])]
 
-        # ---- deltas ----
         m["CE"] = m["call_oi_2"] - m["call_oi_1"]
         m["PE"] = m["put_oi_2"] - m["put_oi_1"]
 
         ce = m.sort_values("CE", ascending=False)
         pe = m.sort_values("PE", ascending=False)
 
-        # ---- SUMS (new requirement) ----
         sum_ce = int(m["CE"].sum())
         sum_pe = int(m["PE"].sum())
 
@@ -151,13 +148,15 @@ def highlight_table(df):
             elif v == top2:
                 styles.loc[i, col] = "background-color:#ffa500;font-weight:bold"
 
-    # highlight SUM columns (directional)
-    for col in ["Σ ΔCE OI", "Σ ΔPE OI"]:
-        for i, v in df[col].items():
-            if v > 0:
-                styles.loc[i, col] = "background-color:#e6ffe6;font-weight:bold"
-            elif v < 0:
-                styles.loc[i, col] = "background-color:#ffe6e6;font-weight:bold"
+    # ---- SUM COLOR LOGIC (TEXT ONLY) ----
+    for i in df.index:
+        diff = df.loc[i, "Σ ΔCE OI"] - df.loc[i, "Σ ΔPE OI"]
+        if diff > 0:
+            styles.loc[i, "Σ ΔCE OI"] = "color:red;font-weight:bold"
+            styles.loc[i, "Σ ΔPE OI"] = "color:red;font-weight:bold"
+        elif diff < 0:
+            styles.loc[i, "Σ ΔCE OI"] = "color:green;font-weight:bold"
+            styles.loc[i, "Σ ΔPE OI"] = "color:green;font-weight:bold"
 
     return df[display_cols].style.apply(lambda _: styles, axis=None)
 
@@ -176,14 +175,15 @@ expiry = st.selectbox("Select Expiry", expiries, index=len(expiries) - 1)
 
 st.divider()
 
-b1, b2 = st.columns(2)
+# -------- BTC TABLE --------
+st.subheader("BTC")
+btc = process_windows(load_data("BTC", expiry))
+st.dataframe(highlight_table(btc), use_container_width=True)
 
-with b1:
-    st.subheader("BTC")
-    btc = process_windows(load_data("BTC", expiry))
-    st.dataframe(highlight_table(btc), use_container_width=True)
+st.divider()
 
-with b2:
-    st.subheader("ETH")
-    eth = process_windows(load_data("ETH", expiry))
-    st.dataframe(highlight_table(eth), use_container_width=True)
+# -------- ETH TABLE --------
+st.subheader("ETH")
+eth = process_windows(load_data("ETH", expiry))
+st.dataframe(highlight_table(eth), use_container_width=True)
+
