@@ -378,38 +378,132 @@ if not eth.empty:
     b.markdown(f"**△ PE:** <span style='color:{c(d_pe)}'>{d_pe}</span>", unsafe_allow_html=True)
     c3.markdown(f"**△ (CE − PE):** <span style='color:{c(d_diff)}'>{d_diff}</span>", unsafe_allow_html=True)
 
-now_ts = datetime.utcnow().strftime("%H:%M")
+# -----------------------------------
+# PUSH RAW SNAPSHOT ONLY (COLLECTOR STYLE)
+# -----------------------------------
+
+def get_ist_hhmm():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+
+@st.cache_data(ttl=15)
+def fetch_live_collector_data(underlying, expiry):
+    url = (
+        f"{DELTA_API}"
+        f"?contract_types=call_options,put_options"
+        f"&underlying_asset_symbols={underlying}"
+        f"&expiry_date={expiry}"
+    )
+
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200:
+        return pd.DataFrame()
+
+    raw = r.json().get("result", [])
+    if not raw:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(raw)
+
+    df = df[
+        [
+            "strike_price", "contract_type",
+            "mark_price", "oi_contracts", "volume",
+            "greeks.gamma", "greeks.delta", "greeks.vega"
+        ]
+    ]
+
+    df.rename(columns={
+        "greeks.gamma": "gamma",
+        "greeks.delta": "delta",
+        "greeks.vega": "vega",
+    }, inplace=True)
+
+    for c in ["strike_price", "mark_price", "oi_contracts", "volume", "gamma", "delta", "vega"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    calls = df[df["contract_type"] == "call_options"].copy()
+    puts  = df[df["contract_type"] == "put_options"].copy()
+
+    calls = calls.rename(columns={
+        "mark_price": "call_mark",
+        "oi_contracts": "call_oi",
+        "volume": "call_volume",
+        "gamma": "call_gamma",
+        "delta": "call_delta",
+        "vega": "call_vega",
+    }).drop(columns=["contract_type"])
+
+    puts = puts.rename(columns={
+        "mark_price": "put_mark",
+        "oi_contracts": "put_oi",
+        "volume": "put_volume",
+        "gamma": "put_gamma",
+        "delta": "put_delta",
+        "vega": "put_vega",
+    }).drop(columns=["contract_type"])
+
+    merged = pd.merge(calls, puts, on="strike_price", how="outer")
+    merged = merged.sort_values("strike_price").reset_index(drop=True)
+
+    merged["Expiry"] = expiry
+    merged["timestamp_IST"] = get_ist_hhmm()
+
+    return merged
+
+
+def compute_max_pain_collector(df):
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    mp = []
+    for i in range(len(df)):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        mp.append(round((q + r + s + t) / 10000))
+
+    df["max_pain"] = mp
+    return df
+
+
+CANONICAL_COLS = [
+    "call_mark","call_oi","call_volume",
+    "call_gamma","call_delta","call_vega",
+    "strike_price",
+    "put_gamma","put_delta","put_vega",
+    "put_volume","put_oi","put_mark",
+    "Expiry","timestamp_IST","max_pain"
+]
+
+
+now_ts = get_ist_hhmm()
 
 if push_to_github and st.session_state.last_push_ts != now_ts:
 
     update_msgs = []
 
-    if not btc.empty:
-        btc_out = btc.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
-        btc_out["timestamp_IST"] = now_ts
+    for underlying in ["BTC", "ETH"]:
+
+        df_live = fetch_live_collector_data(underlying, expiry)
+        if df_live.empty:
+            continue
+
+        df_live = compute_max_pain_collector(df_live)
+        df_live = df_live.reindex(columns=CANONICAL_COLS)
 
         append_csv_to_github(
-            path=f"data/BTC_{expiry}.csv",
-            new_df=btc_out,
-            commit_msg=f"BTC OI window @ {now_ts} IST"
+            path=f"data/{underlying}_{expiry}.csv",
+            new_df=df_live,
+            commit_msg=f"{underlying} snapshot @ {now_ts} IST"
         )
 
-        update_msgs.append(f"✅ BTC OI window data pushed at {now_ts} IST")
-
-    if not eth.empty:
-        eth_out = eth.drop(columns=["_ce1","_ce2","_pe1","_pe2"], errors="ignore")
-        eth_out["timestamp_IST"] = now_ts
-
-        append_csv_to_github(
-            path=f"data/ETH_{expiry}.csv",
-            new_df=eth_out,
-            commit_msg=f"ETH OI window @ {now_ts} IST"
-        )
-
-        update_msgs.append(f"✅ ETH OI window data pushed at {now_ts} IST")
+        update_msgs.append(f"✅ {underlying} snapshot pushed @ {now_ts} IST")
 
     st.session_state.last_push_ts = now_ts
 
     for msg in update_msgs:
         st.success(msg)
-
