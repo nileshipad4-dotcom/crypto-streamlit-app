@@ -362,8 +362,13 @@ if st.session_state.last_push_ts != now_ts:
             new_df=df_live,
             commit_msg=commit_msg
         )
+        update_msgs.append(f"✅ {underlying} data updated to CSV at {now_ts} IST")
 
     st.session_state.last_push_ts = now_ts
+
+    # ✅ SHOW STATUS (BTC then ETH)
+    for msg in update_msgs:
+        st.success(msg)
 
 # ==========================================
 # OI Weighted Strike Range Settings
@@ -409,7 +414,7 @@ for UNDERLYING in ASSETS:
 
     csv_url = f"{BASE_RAW_URL}{UNDERLYING}_{selected_expiry}.csv"
 
-    st.write("📄 Loading CSV:", csv_url)
+   
     try:
         df_raw = pd.read_csv(csv_url)
     except Exception as e:
@@ -683,65 +688,3 @@ st.subheader("📊 PCR Snapshot")
 st.dataframe(pcr_df.round(3), use_container_width=True)
 
 
-st.divider()
-st.subheader("⚡ Live Delta Snapshot (Collector Logic)")
-
-# ---------- BTC ----------
-st.markdown("### 🟠 BTC")
-
-btc_live = fetch_live_collector_data("BTC", selected_expiry)
-
-if btc_live.empty:
-    st.warning("BTC live data unavailable")
-else:
-    btc_live = compute_max_pain_collector(btc_live)
-
-    btc_cols = [
-        "strike_price",
-
-        "call_mark", "call_oi", "call_volume",
-        "call_gamma", "call_delta", "call_vega",
-
-        "put_mark", "put_oi", "put_volume",
-        "put_gamma", "put_delta", "put_vega",
-
-        "max_pain",
-        "timestamp_IST",
-        "Expiry",
-    ]
-
-    st.dataframe(
-        btc_live[btc_cols],
-        use_container_width=True
-    )
-
-st.divider()
-
-# ---------- ETH ----------
-st.markdown("### 🟣 ETH")
-
-eth_live = fetch_live_collector_data("ETH", selected_expiry)
-
-if eth_live.empty:
-    st.warning("ETH live data unavailable")
-else:
-    eth_live = compute_max_pain_collector(eth_live)
-
-    eth_cols = [
-        "strike_price",
-
-        "call_mark", "call_oi", "call_volume",
-        "call_gamma", "call_delta", "call_vega",
-
-        "put_mark", "put_oi", "put_volume",
-        "put_gamma", "put_delta", "put_vega",
-
-        "max_pain",
-        "timestamp_IST",
-        "Expiry",
-    ]
-
-    st.dataframe(
-        eth_live[eth_cols],
-        use_container_width=True
-    )
