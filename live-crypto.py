@@ -294,8 +294,16 @@ def append_csv_to_github(path, new_df, commit_msg):
         sha = r.json()["sha"]
 
         old_df = pd.read_csv(StringIO(content))
-
+        
+        # 🔒 FORCE CANONICAL ORDER ON OLD DATA
+        old_df = old_df.reindex(columns=CANONICAL_COLS)
+        
+        # 🔒 FORCE CANONICAL ORDER ON NEW DATA
+        new_df = new_df.reindex(columns=CANONICAL_COLS)
+        
+        # ✅ SAFE APPEND
         final_df = pd.concat([old_df, new_df], ignore_index=True)
+
 
     else:
         # File does not exist → create new
