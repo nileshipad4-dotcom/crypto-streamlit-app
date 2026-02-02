@@ -1,36 +1,23 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
 import os
-from streamlit_autorefresh import st_autorefresh
 import base64
 from io import StringIO
+from streamlit_autorefresh import st_autorefresh
 
 # =========================================================
 # CONFIG
 # =========================================================
 
-DATA_DIR = "data"               # clean OI history (read-only)
-RAW_DIR  = "data/raw"           # raw collector snapshots (write-only)
-MIN_GAP_MINUTES = 15
-
+DATA_DIR = "data"
+RAW_DIR = "data/raw"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(RAW_DIR, exist_ok=True)
 
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 st_autorefresh(interval=60_000, key="refresh")
-
-# =========================================================
-# SESSION STATE
-# =========================================================
-
-if "last_push_bucket" not in st.session_state:
-    st.session_state.last_push_bucket = None
-
-# =========================================================
-# APIS
-# =========================================================
 
 DELTA_API = "https://api.india.delta.exchange/v2/tickers"
 
@@ -38,10 +25,6 @@ GITHUB_TOKEN  = st.secrets["GITHUB_TOKEN"]
 CRYPTO_REPO   = "nileshipad4-dotcom/crypto-streamlit-app"
 GITHUB_BRANCH = "main"
 GITHUB_API    = "https://api.github.com"
-
-# =========================================================
-# CANONICAL COLUMN ORDER (CRITICAL)
-# =========================================================
 
 CANONICAL_COLS = [
     "call_mark","call_oi","call_volume",
@@ -51,6 +34,13 @@ CANONICAL_COLS = [
     "put_volume","put_oi","put_mark",
     "Expiry","timestamp_IST","max_pain"
 ]
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
+if "last_push_bucket" not in st.session_state:
+    st.session_state.last_push_bucket = None
 
 # =========================================================
 # PRICE
@@ -73,7 +63,7 @@ def get_available_expiries():
     for f in os.listdir(DATA_DIR):
         if f.endswith(".csv"):
             try:
-                expiry = f.split("_")[1].replace(".csv", "")
+                expiry = f.split("_")[1].replace(".csv","")
                 datetime.strptime(expiry, "%d-%m-%Y")
                 expiries.add(expiry)
             except Exception:
@@ -81,7 +71,7 @@ def get_available_expiries():
     return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
 
 # =========================================================
-# LOAD CLEAN OI HISTORY (WINDOW ENGINE)
+# LOAD CLEAN OI HISTORY
 # =========================================================
 
 def load_data(symbol, expiry):
@@ -89,7 +79,7 @@ def load_data(symbol, expiry):
     df["_row"] = range(len(df))
 
     raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
-    base = datetime(2000, 1, 1)
+    base = datetime(2000,1,1)
     out, last, day = [], None, 0
 
     for t in raw:
@@ -102,53 +92,49 @@ def load_data(symbol, expiry):
     return df
 
 # =========================================================
-# WINDOW LOGIC
+# WINDOW ENGINE
 # =========================================================
 
-def build_all_windows(df, min_gap):
+def build_all_windows(df, gap):
     times = (
         df.sort_values("_row")
-        .drop_duplicates("timestamp_IST")["timestamp_IST"]
-        .tolist()
+          .drop_duplicates("timestamp_IST")["timestamp_IST"]
+          .tolist()
     )
 
     windows, i = [], 0
-    while i < len(times) - 1:
+    while i < len(times)-1:
         t1 = times[i]
-        t2 = next((t for t in times[i+1:] if t >= t1 + timedelta(minutes=min_gap)), None)
+        t2 = next((t for t in times[i+1:] if t >= t1 + timedelta(minutes=gap)), None)
         if not t2:
             break
-        windows.append((t1, t2))
+        windows.append((t1,t2))
         i = times.index(t2)
     return windows
 
 
 def build_row(df, t1, t2, live=False):
-    d1 = df[df["timestamp_IST"] == t1]
-    d2 = df[df["timestamp_IST"] == t2]
-
+    d1 = df[df["timestamp_IST"]==t1]
+    d2 = df[df["timestamp_IST"]==t2]
     if d1.empty or d2.empty:
         return None
 
-    m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
-
+    m = pd.merge(d1,d2,on="strike_price",suffixes=("_1","_2"))
     strikes = sorted(m["strike_price"].unique())
-    if len(strikes) <= 4:
+    if len(strikes)<=4:
         return None
     m = m[m["strike_price"].isin(strikes[2:-2])]
 
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
 
-    ce = m.sort_values("CE", ascending=False)
-    pe = m.sort_values("PE", ascending=False)
-
-    if len(ce) < 2 or len(pe) < 2:
+    ce = m.sort_values("CE",ascending=False)
+    pe = m.sort_values("PE",ascending=False)
+    if len(ce)<2 or len(pe)<2:
         return None
 
-    sum_ce = int(m["CE"].sum() / 100)
-    sum_pe = int(m["PE"].sum() / 100)
-    diff = sum_pe - sum_ce
+    sum_ce = int(m["CE"].sum()/100)
+    sum_pe = int(m["PE"].sum()/100)
 
     return {
         "TIME": f"{t1:%H:%M} - {t2:%H:%M}" + (" ⏳" if live else ""),
@@ -158,31 +144,31 @@ def build_row(df, t1, t2, live=False):
         "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
         "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
         "Σ ΔPE OI": sum_pe,
-        "Δ (PE − CE)": diff,
-
-        # 🔒 REQUIRED FOR HIGHLIGHTING
+        "Δ (PE − CE)": sum_pe - sum_ce,
         "_ce1": ce.iloc[0].CE,
         "_ce2": ce.iloc[1].CE,
         "_pe1": pe.iloc[0].PE,
         "_pe2": pe.iloc[1].PE,
+        "_end": t2
     }
 
 
-def process_windows(df):
-    rows = []
-    windows = build_all_windows(df, MIN_GAP_MINUTES)
+def process_windows(df, gap):
+    rows=[]
+    windows = build_all_windows(df,gap)
 
-    for t1, t2 in windows:
-        r = build_row(df, t1, t2)
-        if r:
-            rows.append(r)
+    for t1,t2 in windows:
+        r = build_row(df,t1,t2)
+        if r: rows.append(r)
 
     if windows:
         r = build_row(df, windows[-1][1], df["timestamp_IST"].max(), live=True)
-        if r:
-            rows.append(r)
+        if r: rows.append(r)
 
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values("_end").drop(columns="_end")
+    return out
 
 # =========================================================
 # HIGHLIGHTING
@@ -193,52 +179,48 @@ def highlight_table(df):
         "TIME","MAX CE 1","MAX CE 2","Σ ΔCE OI",
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
     ]
-
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
-    for col, num in [
+    for col,num in [
         ("MAX CE 1","_ce1"),("MAX CE 2","_ce2"),
         ("MAX PE 1","_pe1"),("MAX PE 2","_pe2")
     ]:
         v = df[num].abs()
-        if len(v) < 2:
-            continue
-        top1, top2 = v.nlargest(2).values
+        if len(v)<2: continue
+        top1,top2 = v.nlargest(2).values
         for i,val in v.items():
-            if val == top1:
-                styles.loc[i,col] = "background:#ffa500;color:white;font-weight:bold"
-            elif val == top2:
-                styles.loc[i,col] = "background:#ff4d4d;font-weight:bold"
+            if val==top1:
+                styles.loc[i,col]="background:#ffa500;color:white;font-weight:bold"
+            elif val==top2:
+                styles.loc[i,col]="background:#ff4d4d;font-weight:bold"
 
     for i in df.index:
         d = df.loc[i,"Δ (PE − CE)"]
-        color = "green" if d > 0 else "red" if d < 0 else "black"
+        color = "green" if d>0 else "red" if d<0 else "black"
         for c in ["Σ ΔCE OI","Σ ΔPE OI","Δ (PE − CE)"]:
-            styles.loc[i,c] = f"color:{color};font-weight:bold"
+            styles.loc[i,c]=f"color:{color};font-weight:bold"
 
     return df[cols].style.apply(lambda _: styles, axis=None)
 
 # =========================================================
-# RAW COLLECTOR (WRITE ONLY)
+# RAW COLLECTOR
 # =========================================================
 
-def get_ist_hhmm():
-    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+def get_ist():
+    return (datetime.utcnow()+timedelta(hours=5,minutes=30)).strftime("%H:%M")
 
-
-def fetch_live_collector_data(symbol, expiry):
+def fetch_live(symbol, expiry):
     url = (
         f"{DELTA_API}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={symbol}"
         f"&expiry_date={expiry}"
     )
-
-    r = requests.get(url, timeout=15)
-    if r.status_code != 200:
+    r = requests.get(url,timeout=15)
+    if r.status_code!=200:
         return pd.DataFrame()
 
-    df = pd.json_normalize(r.json().get("result", []))
+    df = pd.json_normalize(r.json().get("result",[]))
     if df.empty:
         return df
 
@@ -251,11 +233,11 @@ def fetch_live_collector_data(symbol, expiry):
     df.rename(columns={
         "greeks.gamma":"gamma",
         "greeks.delta":"delta",
-        "greeks.vega":"vega",
+        "greeks.vega":"vega"
     }, inplace=True)
 
-    calls = df[df["contract_type"]=="call_options"].copy()
-    puts  = df[df["contract_type"]=="put_options"].copy()
+    calls = df[df.contract_type=="call_options"].copy()
+    puts  = df[df.contract_type=="put_options"].copy()
 
     calls = calls.rename(columns={
         "mark_price":"call_mark","oi_contracts":"call_oi",
@@ -269,35 +251,32 @@ def fetch_live_collector_data(symbol, expiry):
         "delta":"put_delta","vega":"put_vega"
     }).drop(columns=["contract_type"])
 
-    m = pd.merge(calls, puts, on="strike_price", how="outer")
-    m["Expiry"] = expiry
-    m["timestamp_IST"] = get_ist_hhmm()
-    m["max_pain"] = 0
+    m = pd.merge(calls,puts,on="strike_price",how="outer")
+    m["Expiry"]=expiry
+    m["timestamp_IST"]=get_ist()
+    m["max_pain"]=0
 
     return m.reindex(columns=CANONICAL_COLS)
 
 
-def append_raw_snapshot(path, df):
+def append_raw(path, df):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    headers={"Authorization":f"token {GITHUB_TOKEN}"}
+    r=requests.get(url,headers=headers)
+    sha,old=None,""
 
-    r = requests.get(url, headers=headers)
-    sha, old = None, ""
+    if r.status_code==200:
+        sha=r.json()["sha"]
+        old=base64.b64decode(r.json()["content"]).decode()
 
-    if r.status_code == 200:
-        sha = r.json()["sha"]
-        old = base64.b64decode(r.json()["content"]).decode()
-
-    new = df.to_csv(index=False, header=not bool(old))
-    payload = {
+    new=df.to_csv(index=False,header=not bool(old))
+    payload={
         "message":"raw snapshot",
         "content":base64.b64encode((old+new).encode()).decode(),
-        "branch":GITHUB_BRANCH,
+        "branch":GITHUB_BRANCH
     }
-    if sha:
-        payload["sha"] = sha
-
-    requests.put(url, headers=headers, json=payload)
+    if sha: payload["sha"]=sha
+    requests.put(url,headers=headers,json=payload)
 
 # =========================================================
 # UI
@@ -305,30 +284,52 @@ def append_raw_snapshot(path, df):
 
 st.title("BTC & ETH OI Change Scanner")
 
-btc_price = get_delta_price("BTC")
-eth_price = get_delta_price("ETH")
+btc_p = get_delta_price("BTC")
+eth_p = get_delta_price("ETH")
 
 c1,c2 = st.columns(2)
-c1.metric("BTC Price", f"{btc_price:,.2f}" if btc_price else "—")
-c2.metric("ETH Price", f"{eth_price:,.2f}" if eth_price else "—")
+c1.metric("BTC Price", f"{btc_p:,.2f}" if btc_p else "—")
+c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 
-expiry = st.selectbox("Select Expiry", get_available_expiries())
+c_exp,c_gap = st.columns([2,1])
+with c_exp:
+    expiry = st.selectbox("Select Expiry", get_available_expiries())
+with c_gap:
+    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
 for sym in ["BTC","ETH"]:
     st.subheader(sym)
-    df = process_windows(load_data(sym, expiry))
+    df = process_windows(load_data(sym,expiry), gap)
     st.dataframe(highlight_table(df), use_container_width=True)
 
+    if not df.empty:
+        times=df["TIME"].tolist()
+        f,t = st.columns(2)
+        with f:
+            t1=st.selectbox(f"From ({sym})",times,index=0,key=f"{sym}f")
+        with t:
+            t2=st.selectbox(f"To ({sym})",times,index=len(times)-1,key=f"{sym}t")
+
+        i1,i2=times.index(t1),times.index(t2)
+        s=df.iloc[min(i1,i2):max(i1,i2)+1]
+
+        ce,pe,d = int(s["Σ ΔCE OI"].sum()), int(s["Σ ΔPE OI"].sum()), int(s["Δ (PE − CE)"].sum())
+        def c(v): return "red" if v>0 else "green" if v<0 else "black"
+
+        a,b,c3 = st.columns(3)
+        a.markdown(f"**△ CE:** <span style='color:{c(ce)}'>{ce}</span>",unsafe_allow_html=True)
+        b.markdown(f"**△ PE:** <span style='color:{c(pe)}'>{pe}</span>",unsafe_allow_html=True)
+        c3.markdown(f"**△ (PE − CE):** <span style='color:{c(d)}'>{d}</span>",unsafe_allow_html=True)
+
 # =========================================================
-# PUSH RAW SNAPSHOTS
+# RAW PUSH
 # =========================================================
 
 bucket = ((datetime.utcnow().hour*60)+datetime.utcnow().minute)//4
-
-if st.toggle("📤 Push raw snapshots") and st.session_state.last_push_bucket != bucket:
+if st.toggle("📤 Push raw snapshots") and st.session_state.last_push_bucket!=bucket:
     for sym in ["BTC","ETH"]:
-        df = fetch_live_collector_data(sym, expiry)
+        df=fetch_live(sym,expiry)
         if not df.empty:
-            append_raw_snapshot(f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv", df)
-    st.session_state.last_push_bucket = bucket
+            append_raw(f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",df)
+    st.session_state.last_push_bucket=bucket
     st.success("Raw snapshots pushed successfully.")
