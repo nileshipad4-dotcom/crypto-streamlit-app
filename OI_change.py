@@ -179,26 +179,50 @@ def highlight_table(df):
         "TIME","MAX CE 1","MAX CE 2","Σ ΔCE OI",
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
     ]
+
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
-    for col,num in [
-        ("MAX CE 1","_ce1"),("MAX CE 2","_ce2"),
-        ("MAX PE 1","_pe1"),("MAX PE 2","_pe2")
-    ]:
-        v = df[num].abs()
-        if len(v)<2: continue
-        top1,top2 = v.nlargest(2).values
-        for i,val in v.items():
-            if val==top1:
-                styles.loc[i,col]="background:#ffa500;color:white;font-weight:bold"
-            elif val==top2:
-                styles.loc[i,col]="background:#ff4d4d;font-weight:bold"
+    highlight_map = [
+        ("MAX CE 1","_ce1"),
+        ("MAX CE 2","_ce2"),
+        ("MAX PE 1","_pe1"),
+        ("MAX PE 2","_pe2"),
+    ]
 
+    for col, num in highlight_map:
+        if num not in df.columns:
+            continue
+
+        v = df[num].abs()
+
+        # rank: 1 = largest
+        ranks = v.rank(method="first", ascending=False)
+
+        for i in df.index:
+            if ranks.loc[i] == 1:
+                styles.loc[i, col] = (
+                    "background-color:#ffa500;"
+                    "color:white;font-weight:bold"
+                )
+            elif ranks.loc[i] == 2:
+                styles.loc[i, col] = (
+                    "background-color:#ff4d4d;"
+                    "font-weight:bold"
+                )
+
+    # ---- SUM COLOR LOGIC ----
     for i in df.index:
-        d = df.loc[i,"Δ (PE − CE)"]
-        color = "green" if d>0 else "red" if d<0 else "black"
-        for c in ["Σ ΔCE OI","Σ ΔPE OI","Δ (PE − CE)"]:
-            styles.loc[i,c]=f"color:{color};font-weight:bold"
+        diff = df.loc[i, "Δ (PE − CE)"]
+        if diff > 0:
+            color = "green"
+        elif diff < 0:
+            color = "red"
+        else:
+            continue
+
+        styles.loc[i, "Σ ΔCE OI"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Σ ΔPE OI"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Δ (PE − CE)"] = f"color:{color};font-weight:bold"
 
     return df[cols].style.apply(lambda _: styles, axis=None)
 
@@ -293,7 +317,13 @@ c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 
 c_exp,c_gap = st.columns([2,1])
 with c_exp:
-    expiry = st.selectbox("Select Expiry", get_available_expiries())
+    expiries = get_available_expiries()
+    expiry = st.selectbox(
+        "Select Expiry",
+        expiries,
+        index=len(expiries) - 1  # ✅ latest expiry default
+    )
+
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
