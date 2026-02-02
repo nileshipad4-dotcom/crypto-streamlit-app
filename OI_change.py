@@ -392,11 +392,12 @@ with col_c:
     else:
         st.markdown("⏸ Snapshot push paused")
 
-PUSH_AT = 30  # seconds
+# Push when countdown is between 02:00 and 03:00
+# i.e. remaining seconds: 120 < remaining < 180
 
 if (
     push_enabled
-    and remaining <= PUSH_AT
+    and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
     for sym in ["BTC", "ETH"]:
