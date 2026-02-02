@@ -126,6 +126,7 @@ def build_all_windows(df, min_gap):
 def build_row(df, t1, t2, live=False):
     d1 = df[df["timestamp_IST"] == t1]
     d2 = df[df["timestamp_IST"] == t2]
+
     if d1.empty or d2.empty:
         return None
 
@@ -141,11 +142,13 @@ def build_row(df, t1, t2, live=False):
 
     ce = m.sort_values("CE", ascending=False)
     pe = m.sort_values("PE", ascending=False)
+
     if len(ce) < 2 or len(pe) < 2:
         return None
 
     sum_ce = int(m["CE"].sum() / 100)
     sum_pe = int(m["PE"].sum() / 100)
+    diff = sum_pe - sum_ce
 
     return {
         "TIME": f"{t1:%H:%M} - {t2:%H:%M}" + (" ⏳" if live else ""),
@@ -155,7 +158,9 @@ def build_row(df, t1, t2, live=False):
         "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
         "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
         "Σ ΔPE OI": sum_pe,
-        "Δ (PE − CE)": sum_pe - sum_ce,
+        "Δ (PE − CE)": diff,
+
+        # 🔒 REQUIRED FOR HIGHLIGHTING
         "_ce1": ce.iloc[0].CE,
         "_ce2": ce.iloc[1].CE,
         "_pe1": pe.iloc[0].PE,
