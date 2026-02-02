@@ -170,6 +170,9 @@ def process_windows(df, gap):
         out = out.sort_values("_end").drop(columns="_end")
     return out
 
+
+
+
 # =========================================================
 # HIGHLIGHTING
 # =========================================================
@@ -282,6 +285,25 @@ def fetch_live(symbol, expiry):
 
     return m.reindex(columns=CANONICAL_COLS)
 
+def get_ist_now():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+def get_bucket_and_remaining():
+    """
+    4-minute bucket aligned to IST clock.
+    Push is allowed once per bucket.
+    """
+    now = get_ist_now()
+
+    total_seconds = (now.minute * 60) + now.second
+    bucket_len = 4 * 60
+
+    bucket_id = total_seconds // bucket_len
+    seconds_remaining = bucket_len - (total_seconds % bucket_len)
+
+    return bucket_id, seconds_remaining
+
 
 def append_raw(path, df):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
@@ -356,10 +378,35 @@ for sym in ["BTC","ETH"]:
 # =========================================================
 
 bucket = ((datetime.utcnow().hour*60)+datetime.utcnow().minute)//4
-if st.toggle("📤 Push raw snapshots") and st.session_state.last_push_bucket!=bucket:
-    for sym in ["BTC","ETH"]:
-        df=fetch_live(sym,expiry)
+col_t, col_c = st.columns([1,2])
+
+with col_t:
+    push_enabled = st.toggle("📤 Push raw snapshots")
+
+bucket, remaining = get_bucket_and_remaining()
+mm, ss = divmod(remaining, 60)
+
+with col_c:
+    if push_enabled:
+        st.markdown(f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`")
+    else:
+        st.markdown("⏸ Snapshot push paused")
+
+PUSH_AT = 30  # seconds
+
+if (
+    push_enabled
+    and remaining <= PUSH_AT
+    and st.session_state.last_push_bucket != bucket
+):
+    for sym in ["BTC", "ETH"]:
+        df = fetch_live(sym, expiry)
         if not df.empty:
-            append_raw(f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",df)
-    st.session_state.last_push_bucket=bucket
+            append_raw(
+                f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",
+                df
+            )
+
+    st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
+
