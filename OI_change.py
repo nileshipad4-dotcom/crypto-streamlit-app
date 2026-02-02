@@ -173,20 +173,33 @@ def build_row(df, t1, t2, is_live=False):
 def sanitize_oi_history(df):
     """
     Keep only rows valid for window-based OI comparison.
-    This fixes BTC incomplete table caused by mixed collector rows.
+    Fixes BTC incomplete table by enforcing clean, time-ordered data.
     """
     required_cols = ["timestamp_IST", "strike_price", "call_oi", "put_oi"]
 
-    # Drop rows missing required OI data
+    # Drop invalid rows
     df = df.dropna(subset=required_cols)
 
-    # Remove duplicate strikes per timestamp (collector causes these)
-    df = df.sort_values("_row").drop_duplicates(
+    # Ensure numeric OI (important for BTC)
+    df["call_oi"] = pd.to_numeric(df["call_oi"], errors="coerce")
+    df["put_oi"] = pd.to_numeric(df["put_oi"], errors="coerce")
+
+    df = df.dropna(subset=["call_oi", "put_oi"])
+
+    # CRITICAL: sort by real timestamp, not _row
+    df = df.sort_values("timestamp_IST")
+
+    # Remove duplicate strikes per timestamp
+    df = df.drop_duplicates(
         subset=["timestamp_IST", "strike_price"],
         keep="last"
     )
 
+    # Rebuild row index for window logic
+    df["_row"] = range(len(df))
+
     return df
+
 
 def process_windows(df):
     rows = []
