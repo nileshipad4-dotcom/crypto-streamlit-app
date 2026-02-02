@@ -208,14 +208,25 @@ def append_csv_to_github(path, new_df, commit_msg):
 
     r = requests.get(url, headers=headers)
 
+    old_df = pd.DataFrame()
+    sha = None
+
     if r.status_code == 200:
-        content = base64.b64decode(r.json()["content"]).decode()
-        sha = r.json()["sha"]
-        old_df = pd.read_csv(StringIO(content))
-        final_df = pd.concat([old_df, new_df], ignore_index=True)
+        try:
+            content = base64.b64decode(r.json()["content"]).decode().strip()
+            sha = r.json()["sha"]
+
+            # 🔒 SAFETY CHECKS
+            if content and "," in content:
+                old_df = pd.read_csv(StringIO(content))
+        except Exception:
+            old_df = pd.DataFrame()
+
+    # ---- APPEND ----
+    if old_df.empty:
+        final_df = new_df.copy()
     else:
-        final_df = new_df
-        sha = None
+        final_df = pd.concat([old_df, new_df], ignore_index=True)
 
     csv_text = final_df.to_csv(index=False)
 
