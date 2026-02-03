@@ -290,8 +290,7 @@ def highlight_table(df, price):
     # ---------- 2.5% PRICE PROXIMITY ----------
     # ---------- 2.5% PRICE + VALUE FILTER ----------
     if price and price > 0:
-        low, high = price * 0.995, price * 1.005
-
+        low, high = price * 0.975, price * 1.025
 
         def extract(cell):
             # "84000:- 12002" → (84000, 12002)
@@ -308,12 +307,12 @@ def highlight_table(df, price):
                 if (
                     strike is not None
                     and val is not None
-                    and abs(val) > 10000
+                    and abs(val) > 2000
                     and low <= strike <= high
                 ):
-
                     styles.loc[i, col] += (
-                        "color:indigo;"
+                        "background-color:#1e90ff;"
+                        "color:white;"
                         "font-weight:bold;"
                     )
 
