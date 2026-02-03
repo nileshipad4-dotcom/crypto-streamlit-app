@@ -288,21 +288,32 @@ def highlight_table(df, price):
         styles.loc[i, "Δ (PE − CE)"] += f"color:{color};font-weight:bold;"
 
     # ---------- 2.5% PRICE PROXIMITY ----------
+    # ---------- 2.5% PRICE + VALUE FILTER ----------
     if price and price > 0:
         low, high = price * 0.975, price * 1.025
 
-        def extract_strike(cell):
+        def extract(cell):
+            # "84000:- 12002" → (84000, 12002)
             try:
-                return int(cell.split(":-")[0].strip())
+                s, v = cell.split(":-")
+                return int(s.strip()), int(v.strip())
             except Exception:
-                return None
+                return None, None
 
         for i in df.index:
             for col in ["MAX CE 1","MAX CE 2","MAX PE 1","MAX PE 2"]:
-                strike = extract_strike(df.loc[i, col])
-                if strike and low <= strike <= high:
+                strike, val = extract(df.loc[i, col])
+
+                if (
+                    strike is not None
+                    and val is not None
+                    and abs(val) > 2000
+                    and low <= strike <= high
+                ):
                     styles.loc[i, col] += (
-                        "background-color:#1e90ff;color:white;font-weight:bold;"
+                        "background-color:#1e90ff;"
+                        "color:white;"
+                        "font-weight:bold;"
                     )
 
     return df[cols].style.apply(lambda _: styles, axis=None)
