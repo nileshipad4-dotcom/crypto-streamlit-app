@@ -396,17 +396,27 @@ c1,c2 = st.columns(2)
 c1.metric("BTC Price", f"{btc_p:,.2f}" if btc_p else "—")
 c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 
-c_exp,c_gap = st.columns([2,1])
+c_exp, c_gap, c_thr = st.columns([2,1,1])
+
 with c_exp:
     expiries = get_available_expiries()
     expiry = st.selectbox(
         "Select Expiry",
         expiries,
-        index=len(expiries) - 1  # ✅ latest expiry default
+        index=len(expiries) - 1
     )
 
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
+
+with c_thr:
+    # default handled per symbol later
+    oi_threshold = st.selectbox(
+        "Large OI Threshold",
+        [5000, 10000, 15000, 20000, 25000, 50000],
+        index=1  # placeholder, overridden per symbol
+    )
+
 
 threshold_map = {
     "BTC": st.selectbox("BTC Large OI Threshold", [8000, 10000, 14000, 18000, 20000, 23000, 25000, 28000, 30000], index=1),
@@ -416,6 +426,22 @@ threshold_map = {
 
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
+    # Per-symbol default threshold
+    if sym == "BTC":
+        threshold = st.selectbox(
+            "BTC Large OI Threshold",
+            [5000, 10000, 15000, 20000, 25000, 50000],
+            index=1,
+            key="btc_thr"
+        )
+    else:
+        threshold = st.selectbox(
+            "ETH Large OI Threshold",
+            [10000, 15000, 20000, 25000, 50000],
+            index=2,  # ✅ 20,000 default
+            key="eth_thr"
+        )
+
 
     df = process_windows(load_data(sym, expiry), gap)
 
@@ -462,10 +488,10 @@ for sym in ["BTC", "ETH"]:
                 styles = ["", ""]
             
                 if row.name in ce_hi:
-                    styles[0] = "background-color:#fff3cd;font-weight:bold"
+                    styles[0] = "font-weight:bold"
             
                 if row.name in pe_hi:
-                    styles[1] = "background-color:#e8f5e9;font-weight:bold"
+                    styles[1] = "font-weight:bold"
             
                 return styles
 
