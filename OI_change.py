@@ -488,12 +488,13 @@ for sym in ["BTC", "ETH"]:
                 styles = ["", ""]
             
                 if row.name in ce_hi:
-                    styles[0] = "font-weight:bold"
+                    styles[0] = "font-weight:bold;color:orange"
             
                 if row.name in pe_hi:
-                    styles[1] = "font-weight:bold"
+                    styles[1] = "font-weight:bold;color:orange"
             
                 return styles
+
 
             st.markdown("**Large OI Changes**")
             st.dataframe(
