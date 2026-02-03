@@ -475,7 +475,22 @@ for sym in ["BTC", "ETH"]:
             unsafe_allow_html=True
         )
 
-    
+        st.markdown(
+            """
+            <style>
+            /* Override Pandas Styler defaults */
+            .dataframe td {
+                font-weight: normal !important;
+            }
+            .dataframe th {
+                font-weight: normal !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        
+            
         styled = highlight_table(df, price)
         
         st.markdown(
