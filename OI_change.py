@@ -11,6 +11,11 @@ from streamlit_autorefresh import st_autorefresh
 # CONFIG
 # =========================================================
 
+FIXED_THRESHOLDS = {
+    "BTC": 10000,
+    "ETH": 15000,
+}
+
 DATA_DIR = "data"
 RAW_DIR = "data/raw"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -416,11 +421,6 @@ with c_gap:
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
     # Per-symbol default threshold
-    FIXED_THRESHOLDS = {
-        "BTC": 10000,
-        "ETH": 15000,
-    }
-
 
 
     df = process_windows(load_data(sym, expiry), gap)
@@ -437,7 +437,7 @@ for sym in ["BTC", "ETH"]:
     # ---------------- SIDE TABLE ----------------
     with side_col:
         if not df.empty:
-            threshold = threshold_map[sym]
+            threshold = FIXED_THRESHOLDS[sym]
             ce_df, pe_df = extract_big_oi(df, threshold=threshold)
 
 
