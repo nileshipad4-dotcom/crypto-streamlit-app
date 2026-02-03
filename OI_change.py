@@ -241,11 +241,18 @@ def mark_price_neighbors(df, price):
 # =========================================================
 
 
-def highlight_table(df):
+def highlight_table(df, price):
     cols = [
         "TIME","MAX CE 1","MAX CE 2","Σ ΔCE OI",
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
     ]
+
+
+    for col in ["MAX CE 1", "MAX CE 2", "MAX PE 1", "MAX PE 2"]:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: style_strike_html(x, price)
+            )
 
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
@@ -292,6 +299,32 @@ def highlight_table(df):
         styles.loc[i, "Δ (PE − CE)"] = f"color:{color};font-weight:bold"
 
     return df[cols].style.apply(lambda _: styles, axis=None)
+
+
+def style_strike_html(cell, price, pct=0.005, min_val=2000):
+    """
+    Styles ONLY the strike part if:
+    - strike within ±pct of price
+    - abs(value) > min_val
+    """
+    try:
+        strike, val = cell.split(":-")
+        strike = int(strike.strip())
+        val = int(val.strip())
+    except Exception:
+        return cell
+
+    if price is None:
+        return cell
+
+    if abs(val) > min_val:
+        if price * (1 - pct) <= strike <= price * (1 + pct):
+            return (
+                f"<span style='font-weight:bold;color:#1f4fd8'>{strike}</span>"
+                f":- {val}"
+            )
+
+    return cell
 
 # =========================================================
 # RAW COLLECTOR
@@ -430,7 +463,9 @@ for sym in ["BTC", "ETH"]:
     # ---------------- MAIN TABLE ----------------
     with main_col:
         st.dataframe(
-            highlight_table(df),
+            price = btc_p if sym == "BTC" else eth_p
+            highlight_table(df, price)
+
             use_container_width=True
         )
 
