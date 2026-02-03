@@ -301,7 +301,7 @@ def highlight_table(df, price):
     return df[cols].style.apply(lambda _: styles, axis=None)
 
 
-def style_strike_html(cell, price, pct=0.005, min_val=2000):
+def style_strike_html(cell, price, pct=0.025, min_val=2000):
     """
     Styles ONLY the strike part if:
     - strike within ±pct of price
