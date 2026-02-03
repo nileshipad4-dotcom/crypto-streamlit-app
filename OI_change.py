@@ -409,38 +409,18 @@ with c_exp:
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
-with c_thr:
-    # default handled per symbol later
-    oi_threshold = st.selectbox(
-        "Large OI Threshold",
-        [5000, 10000, 15000, 20000, 25000, 50000],
-        index=1  # placeholder, overridden per symbol
-    )
 
 
-threshold_map = {
-    "BTC": st.selectbox("BTC Large OI Threshold", [8000, 10000, 14000, 18000, 20000, 23000, 25000, 28000, 30000], index=1),
-    "ETH": st.selectbox("ETH Large OI Threshold", [8000, 10000, 14000, 18000, 20000, 23000, 25000, 28000, 30000], index=1),
-}
 
 
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
     # Per-symbol default threshold
-    if sym == "BTC":
-        threshold = st.selectbox(
-            "BTC Large OI Threshold",
-            [5000, 10000, 15000, 20000, 25000, 50000],
-            index=1,
-            key="btc_thr"
-        )
-    else:
-        threshold = st.selectbox(
-            "ETH Large OI Threshold",
-            [10000, 15000, 20000, 25000, 50000],
-            index=2,  # ✅ 20,000 default
-            key="eth_thr"
-        )
+    FIXED_THRESHOLDS = {
+        "BTC": 10000,
+        "ETH": 15000,
+    }
+
 
 
     df = process_windows(load_data(sym, expiry), gap)
