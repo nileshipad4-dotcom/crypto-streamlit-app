@@ -5,4 +5,5 @@ streamlit-autorefresh
 plotly
 yfinance 
 matplotlib
+python-binance
 
