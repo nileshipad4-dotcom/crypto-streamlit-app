@@ -206,6 +206,29 @@ def extract_big_oi(df, threshold=10000):
 
     return ce_df, pe_df
 
+def mark_price_neighbors(df, price):
+    """
+    Returns set of row indices to highlight based on price position.
+    """
+    if df.empty or "Strike" not in df:
+        return set()
+
+    strikes = df["Strike"].dropna().values
+    if len(strikes) == 0:
+        return set()
+
+    below = df[df["Strike"] <= price]
+    above = df[df["Strike"] >= price]
+
+    highlight = set()
+
+    if not below.empty:
+        highlight.add(below.index[-1])
+
+    if not above.empty:
+        highlight.add(above.index[0])
+
+    return highlight
 
 
 # =========================================================
@@ -385,6 +408,12 @@ with c_exp:
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
+threshold_map = {
+    "BTC": st.selectbox("BTC Large OI Threshold", [8000, 10000, 14000, 18000, 20000, 23000, 25000, 28000, 30000], index=1),
+    "ETH": st.selectbox("ETH Large OI Threshold", [8000, 10000, 14000, 18000, 20000, 23000, 25000, 28000, 30000], index=1),
+}
+
+
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
 
@@ -402,7 +431,9 @@ for sym in ["BTC", "ETH"]:
     # ---------------- SIDE TABLE ----------------
     with side_col:
         if not df.empty:
-            ce_df, pe_df = extract_big_oi(df, threshold=10000)
+            threshold = threshold_map[sym]
+            ce_df, pe_df = extract_big_oi(df, threshold=threshold)
+
 
             max_len = max(len(ce_df), len(pe_df))
             ce_df = ce_df.reindex(range(max_len))
@@ -421,12 +452,30 @@ for sym in ["BTC", "ETH"]:
                 ),
             })
 
+            # Determine current price
+            price = btc_p if sym == "BTC" else eth_p
+            
+            ce_hi = mark_price_neighbors(ce_df, price)
+            pe_hi = mark_price_neighbors(pe_df, price)
+            
+            def style_side(row):
+                styles = ["", ""]
+            
+                if row.name in ce_hi:
+                    styles[0] = "background-color:#fff3cd;font-weight:bold"
+            
+                if row.name in pe_hi:
+                    styles[1] = "background-color:#e8f5e9;font-weight:bold"
+            
+                return styles
+
             st.markdown("**Large OI Changes**")
             st.dataframe(
-                side_table,
+                side_table.style.apply(style_side, axis=1),
                 use_container_width=True,
                 height=320
             )
+
 
 
     if not df.empty:
