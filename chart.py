@@ -9,7 +9,11 @@ st.title("🕯️ Bitcoin 3-Minute Candlestick Chart (Coinbase)")
 @st.cache_data(ttl=60)
 def load_data():
     url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
-    params = {"granularity": 180}  # 3 minutes
+
+    params = {
+        "granularity": 180,  # 3 minutes
+        "limit": 300         # REQUIRED to avoid 400
+    }
 
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -20,12 +24,12 @@ def load_data():
 
     if r.status_code != 200:
         st.error(f"Coinbase API error: {r.status_code}")
+        st.write(r.text)
         st.stop()
 
     data = r.json()
 
-    # Coinbase format:
-    # [ time, low, high, open, close, volume ]
+    # Format: [ time, low, high, open, close, volume ]
     df = pd.DataFrame(
         data,
         columns=["time", "Low", "High", "Open", "Close", "Volume"]
@@ -42,7 +46,6 @@ def load_data():
 
 df = load_data()
 
-# Safety check
 if df.empty:
     st.error("No candle data returned.")
     st.stop()
