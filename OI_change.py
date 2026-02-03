@@ -464,9 +464,11 @@ for sym in ["BTC", "ETH"]:
     with main_col:
         price = btc_p if sym == "BTC" else eth_p
     
-        st.dataframe(
-            highlight_table(df, price),
-            use_container_width=True
+        styled = highlight_table(df, price)
+        
+        st.markdown(
+            styled.to_html(escape=False),
+            unsafe_allow_html=True
         )
 
 
