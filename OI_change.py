@@ -310,9 +310,9 @@ def highlight_table(df, price):
                     and abs(val) > 2000
                     and low <= strike <= high
                 ):
+
                     styles.loc[i, col] += (
-                        "background-color:#1e90ff;"
-                        "color:white;"
+                        "color:#1e90ff;"
                         "font-weight:bold;"
                     )
 
