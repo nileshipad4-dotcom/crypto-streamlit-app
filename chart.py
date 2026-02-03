@@ -2,32 +2,40 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="BTC 3-Minute Candles", layout="wide")
-st.title("🕯️ Bitcoin 3-Minute Candlestick Chart")
+st.set_page_config(layout="wide")
+st.title("🕯️ BTC 3-Minute Candlestick Chart")
 
 @st.cache_data(ttl=60)
 def load_data():
-    return yf.download(
-        tickers="BTC-USD",
-        period="7d",        # yfinance limits small intervals
-        interval="3m"
+    df = yf.download(
+        "BTC-USD",
+        interval="3m",
+        period="5d",   # keep this small
+        progress=False
     )
+    df = df.dropna()  # CRITICAL
+    return df
 
-with st.spinner("Loading BTC data..."):
+with st.spinner("Fetching data..."):
     df = load_data()
 
-# Build candlestick chart
+# 🚨 HARD STOP if no data
+if df.empty:
+    st.error("No 3-minute data returned. Refresh in 1–2 minutes.")
+    st.stop()
+
+st.write(f"Loaded {len(df)} candles")
+
 fig = go.Figure(
-    data=[
-        go.Candlestick(
-            x=df.index,
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-            name="BTC-USD"
-        )
-    ]
+    go.Candlestick(
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color="green",
+        decreasing_line_color="red"
+    )
 )
 
 fig.update_layout(
