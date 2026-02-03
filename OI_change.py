@@ -320,7 +320,7 @@ def style_strike_html(cell, price, pct=0.025, min_val=2000):
     if abs(val) > min_val:
         if price * (1 - pct) <= strike <= price * (1 + pct):
             return (
-                f"<span style='font-weight:bold;color:#1f4fd8'>{strike}</span>"
+                f"<span style='color:#1f4fd8'>{strike}</span>"
                 f":- {val}"
             )
 
