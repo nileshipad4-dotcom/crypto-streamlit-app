@@ -463,6 +463,18 @@ for sym in ["BTC", "ETH"]:
     # ---------------- MAIN TABLE ----------------
     with main_col:
         price = btc_p if sym == "BTC" else eth_p
+
+        st.markdown(
+            """
+            <style>
+            table { font-weight: normal; }
+            td { font-weight: normal; }
+            th { font-weight: normal; }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
     
         styled = highlight_table(df, price)
         
