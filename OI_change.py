@@ -241,7 +241,7 @@ def mark_price_neighbors(df, price):
 # =========================================================
 
 
-def highlight_table(df):
+def highlight_table(df, price):
     cols = [
         "TIME","MAX CE 1","MAX CE 2","Σ ΔCE OI",
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
@@ -249,6 +249,7 @@ def highlight_table(df):
 
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
+    # ---------- EXISTING HIGHLIGHTS ----------
     highlight_map = [
         ("MAX CE 1","_ce1"),
         ("MAX CE 2","_ce2"),
@@ -261,23 +262,18 @@ def highlight_table(df):
             continue
 
         v = df[num].abs()
-
-        # rank: 1 = largest
         ranks = v.rank(method="first", ascending=False)
 
         for i in df.index:
             if ranks.loc[i] == 1:
-                styles.loc[i, col] = (
-                    "background-color:#ffa500;"
-                    "color:white;font-weight:bold"
+                styles.loc[i, col] += (
+                    "background-color:#ffa500;color:white;font-weight:bold;"
                 )
             elif ranks.loc[i] == 2:
-                styles.loc[i, col] = (
-                    "background-color:#ff4d4d;"
-                    "font-weight:bold"
+                styles.loc[i, col] += (
+                    "background-color:#ff4d4d;font-weight:bold;"
                 )
 
-    # ---- SUM COLOR LOGIC ----
     for i in df.index:
         diff = df.loc[i, "Δ (PE − CE)"]
         if diff > 0:
@@ -287,9 +283,27 @@ def highlight_table(df):
         else:
             continue
 
-        styles.loc[i, "Σ ΔCE OI"] = f"color:{color};font-weight:bold"
-        styles.loc[i, "Σ ΔPE OI"] = f"color:{color};font-weight:bold"
-        styles.loc[i, "Δ (PE − CE)"] = f"color:{color};font-weight:bold"
+        styles.loc[i, "Σ ΔCE OI"] += f"color:{color};font-weight:bold;"
+        styles.loc[i, "Σ ΔPE OI"] += f"color:{color};font-weight:bold;"
+        styles.loc[i, "Δ (PE − CE)"] += f"color:{color};font-weight:bold;"
+
+    # ---------- 2.5% PRICE PROXIMITY ----------
+    if price and price > 0:
+        low, high = price * 0.975, price * 1.025
+
+        def extract_strike(cell):
+            try:
+                return int(cell.split(":-")[0].strip())
+            except Exception:
+                return None
+
+        for i in df.index:
+            for col in ["MAX CE 1","MAX CE 2","MAX PE 1","MAX PE 2"]:
+                strike = extract_strike(df.loc[i, col])
+                if strike and low <= strike <= high:
+                    styles.loc[i, col] += (
+                        "background-color:#1e90ff;color:white;font-weight:bold;"
+                    )
 
     return df[cols].style.apply(lambda _: styles, axis=None)
 
@@ -429,10 +443,13 @@ for sym in ["BTC", "ETH"]:
 
     # ---------------- MAIN TABLE ----------------
     with main_col:
+        price = btc_p if sym == "BTC" else eth_p
+        
         st.dataframe(
-            highlight_table(df),
+            highlight_table(df, price),
             use_container_width=True
         )
+
 
     # ---------------- SIDE TABLE ----------------
     with side_col:
