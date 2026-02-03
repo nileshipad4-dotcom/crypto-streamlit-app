@@ -313,7 +313,7 @@ def highlight_table(df, price):
                 ):
 
                     styles.loc[i, col] += (
-                        "color:#1e90ff;"
+                        "color:indigo;"
                         "font-weight:bold;"
                     )
 
