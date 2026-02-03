@@ -290,7 +290,8 @@ def highlight_table(df, price):
     # ---------- 2.5% PRICE PROXIMITY ----------
     # ---------- 2.5% PRICE + VALUE FILTER ----------
     if price and price > 0:
-        low, high = price * 0.195, price * 1.005
+        low, high = price * 0.995, price * 1.005
+
 
         def extract(cell):
             # "84000:- 12002" → (84000, 12002)
