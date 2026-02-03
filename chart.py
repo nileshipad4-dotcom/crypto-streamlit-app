@@ -3,16 +3,15 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="BTC 3-Minute Candles", layout="wide")
-st.title("🕯️ Bitcoin 3-Minute Candlestick Chart (Coinbase)")
+st.set_page_config(page_title="BTC 5-Minute Candles", layout="wide")
+st.title("🕯️ Bitcoin 5-Minute Candlestick Chart (Coinbase)")
 
 @st.cache_data(ttl=60)
 def load_data():
     url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
-
     params = {
-        "granularity": 180,  # 3 minutes
-        "limit": 300         # REQUIRED to avoid 400
+        "granularity": 300,  # ✅ 5 minutes (SUPPORTED)
+        "limit": 300
     }
 
     headers = {
