@@ -3,19 +3,29 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(layout="wide")
-st.title("🕯️ BTC 3-Minute Candlestick Chart (Coinbase)")
+st.set_page_config(page_title="BTC 3-Minute Candles", layout="wide")
+st.title("🕯️ Bitcoin 3-Minute Candlestick Chart (Coinbase)")
 
 @st.cache_data(ttl=60)
 def load_data():
     url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
     params = {"granularity": 180}  # 3 minutes
 
-    r = requests.get(url, params=params, timeout=20)
-    r.raise_for_status()
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
+
+    r = requests.get(url, params=params, headers=headers, timeout=20)
+
+    if r.status_code != 200:
+        st.error(f"Coinbase API error: {r.status_code}")
+        st.stop()
+
     data = r.json()
 
-    # Format: [ time, low, high, open, close, volume ]
+    # Coinbase format:
+    # [ time, low, high, open, close, volume ]
     df = pd.DataFrame(
         data,
         columns=["time", "Low", "High", "Open", "Close", "Volume"]
@@ -24,13 +34,17 @@ def load_data():
     df["time"] = pd.to_datetime(df["time"], unit="s")
     df = df.sort_values("time")
 
-    return df.astype(float, errors="ignore")
+    df[["Open", "High", "Low", "Close", "Volume"]] = df[
+        ["Open", "High", "Low", "Close", "Volume"]
+    ].astype(float)
+
+    return df
 
 df = load_data()
 
-# Hard fail if empty
+# Safety check
 if df.empty:
-    st.error("No data returned from Coinbase.")
+    st.error("No candle data returned.")
     st.stop()
 
 st.write(f"Loaded {len(df)} candles")
@@ -41,11 +55,15 @@ fig = go.Figure(
         open=df["Open"],
         high=df["High"],
         low=df["Low"],
-        close=df["Close"]
+        close=df["Close"],
+        increasing_line_color="green",
+        decreasing_line_color="red"
     )
 )
 
 fig.update_layout(
+    xaxis_title="Time",
+    yaxis_title="Price (USD)",
     xaxis_rangeslider_visible=False,
     height=600
 )
