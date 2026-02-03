@@ -171,11 +171,47 @@ def process_windows(df, gap):
     return out
 
 
+# =========================================================
+# SIDE TABLE: LARGE OI EXTRACTOR
+# =========================================================
+
+def extract_big_oi(df, threshold=10000):
+    ce_rows = []
+    pe_rows = []
+
+    def parse(cell):
+        # "84000:- 12002" → (84000, 12002)
+        try:
+            strike, val = cell.split(":-")
+            return int(strike.strip()), int(val.strip())
+        except Exception:
+            return None, None
+
+    for _, row in df.iterrows():
+        for col in ["MAX CE 1", "MAX CE 2"]:
+            s, v = parse(row[col])
+            if s is not None and abs(v) > threshold:
+                ce_rows.append((s, v))
+
+        for col in ["MAX PE 1", "MAX PE 2"]:
+            s, v = parse(row[col])
+            if s is not None and abs(v) > threshold:
+                pe_rows.append((s, v))
+
+    ce_df = pd.DataFrame(ce_rows, columns=["Strike", "ΔOI"])
+    pe_df = pd.DataFrame(pe_rows, columns=["Strike", "ΔOI"])
+
+    ce_df = ce_df.sort_values("Strike").reset_index(drop=True)
+    pe_df = pe_df.sort_values("Strike").reset_index(drop=True)
+
+    return ce_df, pe_df
+
 
 
 # =========================================================
 # HIGHLIGHTING
 # =========================================================
+
 
 def highlight_table(df):
     cols = [
@@ -349,10 +385,49 @@ with c_exp:
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
-for sym in ["BTC","ETH"]:
+for sym in ["BTC", "ETH"]:
     st.subheader(sym)
-    df = process_windows(load_data(sym,expiry), gap)
-    st.dataframe(highlight_table(df), use_container_width=True)
+
+    df = process_windows(load_data(sym, expiry), gap)
+
+    main_col, side_col = st.columns([3, 1])
+
+    # ---------------- MAIN TABLE ----------------
+    with main_col:
+        st.dataframe(
+            highlight_table(df),
+            use_container_width=True
+        )
+
+    # ---------------- SIDE TABLE ----------------
+    with side_col:
+        if not df.empty:
+            ce_df, pe_df = extract_big_oi(df, threshold=10000)
+
+            max_len = max(len(ce_df), len(pe_df))
+            ce_df = ce_df.reindex(range(max_len))
+            pe_df = pe_df.reindex(range(max_len))
+
+            side_table = pd.DataFrame({
+                "CE > 10k": ce_df.apply(
+                    lambda r: f"{int(r.Strike)} : {int(r['ΔOI'])}"
+                    if pd.notna(r.Strike) else "",
+                    axis=1
+                ),
+                "PE > 10k": pe_df.apply(
+                    lambda r: f"{int(r.Strike)} : {int(r['ΔOI'])}"
+                    if pd.notna(r.Strike) else "",
+                    axis=1
+                ),
+            })
+
+            st.markdown("**Large OI Changes**")
+            st.dataframe(
+                side_table,
+                use_container_width=True,
+                height=320
+            )
+
 
     if not df.empty:
         times=df["TIME"].tolist()
