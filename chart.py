@@ -1,34 +1,39 @@
 import streamlit as st
-import yfinance as yf
+import pandas as pd
+from binance.client import Client
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("🕯️ BTC 3-Minute Candlestick Chart")
+st.title("🕯️ BTC 3-Minute Candlestick Chart (Binance)")
+
+client = Client()  # public endpoints only, no API key needed
 
 @st.cache_data(ttl=60)
 def load_data():
-    df = yf.download(
-        "BTC-USD",
-        interval="3m",
-        period="5d",   # keep this small
-        progress=False
+    klines = client.get_klines(
+        symbol="BTCUSDT",
+        interval=Client.KLINE_INTERVAL_3MINUTE,
+        limit=500
     )
-    df = df.dropna()  # CRITICAL
+
+    df = pd.DataFrame(klines, columns=[
+        "time", "Open", "High", "Low", "Close", "Volume",
+        "_", "_", "_", "_", "_", "_"
+    ])
+
+    df["time"] = pd.to_datetime(df["time"], unit="ms")
+    df[["Open", "High", "Low", "Close", "Volume"]] = df[
+        ["Open", "High", "Low", "Close", "Volume"]
+    ].astype(float)
+
     return df
 
-with st.spinner("Fetching data..."):
+with st.spinner("Loading Binance data..."):
     df = load_data()
-
-# 🚨 HARD STOP if no data
-if df.empty:
-    st.error("No 3-minute data returned. Refresh in 1–2 minutes.")
-    st.stop()
-
-st.write(f"Loaded {len(df)} candles")
 
 fig = go.Figure(
     go.Candlestick(
-        x=df.index,
+        x=df["time"],
         open=df["Open"],
         high=df["High"],
         low=df["Low"],
@@ -40,7 +45,7 @@ fig = go.Figure(
 
 fig.update_layout(
     xaxis_title="Time",
-    yaxis_title="Price (USD)",
+    yaxis_title="Price (USDT)",
     xaxis_rangeslider_visible=False,
     height=600
 )
