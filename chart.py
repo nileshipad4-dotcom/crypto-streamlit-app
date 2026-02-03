@@ -1,22 +1,23 @@
 import streamlit as st
 import pandas as pd
-from binance.client import Client
+import requests
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("🕯️ BTC 3-Minute Candlestick Chart (Binance)")
-
-client = Client()  # public endpoints only, no API key needed
+st.title("🕯️ BTC 3-Minute Candlestick Chart (Binance REST)")
 
 @st.cache_data(ttl=60)
 def load_data():
-    klines = client.get_klines(
-        symbol="BTCUSDT",
-        interval=Client.KLINE_INTERVAL_3MINUTE,
-        limit=500
-    )
+    url = "https://api.binance.com/api/v3/klines"
+    params = {
+        "symbol": "BTCUSDT",
+        "interval": "3m",
+        "limit": 500
+    }
 
-    df = pd.DataFrame(klines, columns=[
+    data = requests.get(url, params=params, timeout=20).json()
+
+    df = pd.DataFrame(data, columns=[
         "time", "Open", "High", "Low", "Close", "Volume",
         "_", "_", "_", "_", "_", "_"
     ])
@@ -28,8 +29,7 @@ def load_data():
 
     return df
 
-with st.spinner("Loading Binance data..."):
-    df = load_data()
+df = load_data()
 
 fig = go.Figure(
     go.Candlestick(
@@ -37,15 +37,11 @@ fig = go.Figure(
         open=df["Open"],
         high=df["High"],
         low=df["Low"],
-        close=df["Close"],
-        increasing_line_color="green",
-        decreasing_line_color="red"
+        close=df["Close"]
     )
 )
 
 fig.update_layout(
-    xaxis_title="Time",
-    yaxis_title="Price (USDT)",
     xaxis_rangeslider_visible=False,
     height=600
 )
