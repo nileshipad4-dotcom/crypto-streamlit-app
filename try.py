@@ -565,6 +565,67 @@ def fetch_live(symbol, expiry):
 def get_ist_now():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
+def write_top7_large_oi_csv(sym, df, price):
+    """
+    Writes top 7 CE and top 7 PE large OI changes
+    within ±5% price range into a single CSV.
+    """
+    if df.empty or price is None:
+        return
+
+    rows = []
+
+    def parse(cell):
+        try:
+            s, v = cell.split(":-")
+            return int(s.strip()), int(v.strip())
+        except Exception:
+            return None, None
+
+    low, high = price * 0.95, price * 1.05
+
+    ce_vals = []
+    pe_vals = []
+
+    for _, row in df.iterrows():
+        for col in ["MAX CE 1", "MAX CE 2"]:
+            s, v = parse(row[col])
+            if s and v and low <= s <= high:
+                ce_vals.append((s, v))
+
+        for col in ["MAX PE 1", "MAX PE 2"]:
+            s, v = parse(row[col])
+            if s and v and low <= s <= high:
+                pe_vals.append((s, v))
+
+    # Deduplicate by strike, keep max abs OI
+    ce_df = (
+        pd.DataFrame(ce_vals, columns=["STRIKE", "DELTA_OI"])
+        .sort_values("DELTA_OI", key=lambda x: x.abs(), ascending=False)
+        .drop_duplicates("STRIKE")
+        .head(7)
+    )
+
+    pe_df = (
+        pd.DataFrame(pe_vals, columns=["STRIKE", "DELTA_OI"])
+        .sort_values("DELTA_OI", key=lambda x: x.abs(), ascending=False)
+        .drop_duplicates("STRIKE")
+        .head(7)
+    )
+
+    for _, r in ce_df.iterrows():
+        rows.append(("CE", r.STRIKE, r.DELTA_OI))
+
+    for _, r in pe_df.iterrows():
+        rows.append(("PE", r.STRIKE, r.DELTA_OI))
+
+    if not rows:
+        return
+
+    out = pd.DataFrame(rows, columns=["SIDE", "STRIKE", "DELTA_OI"])
+
+    path = f"{RAW_DIR}/{sym}_large_oi_top7.csv"
+    out.to_csv(path, index=False)
 
 def get_bucket_and_remaining():
     """
@@ -686,6 +747,10 @@ for sym in ["BTC", "ETH"]:
 
 
     df = process_windows(load_data(sym, expiry), gap)
+
+    price = btc_p if sym == "BTC" else eth_p
+
+    write_top7_large_oi_csv(sym, df, price)
 
     main_col, side_col = st.columns([3, 1])
 
