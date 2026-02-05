@@ -69,22 +69,28 @@ def get_delta_price(symbol):
 # EXPIRIES
 # =========================================================
 
-def get_available_expiries():
-    expiries = set()
-
+def get_upcoming_expiry():
     if not os.path.exists(RAW_DIR):
-        return []
+        return None
+
+    today = datetime.utcnow().date()
+    expiries = []
 
     for f in os.listdir(RAW_DIR):
         if f.endswith("_snapshots.csv"):
             try:
                 expiry = f.split("_")[1]
-                datetime.strptime(expiry, "%d-%m-%Y")
-                expiries.add(expiry)
+                dt = datetime.strptime(expiry, "%d-%m-%Y").date()
+                if dt >= today:
+                    expiries.append(dt)
             except Exception:
                 pass
 
-    return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
+    if not expiries:
+        return None
+
+    return min(expiries).strftime("%d-%m-%Y")
+
 
 def sync_from_github(repo_path, local_path):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{repo_path}"
@@ -99,22 +105,6 @@ def sync_from_github(repo_path, local_path):
         f.write(content)
 
 
-def get_next_expiries(selected_expiry, count=1):
-    expiries = get_available_expiries()
-
-    # Always include selected expiry
-    result = [selected_expiry]
-
-    # Add future expiries even if CSV doesn't exist yet
-    try:
-        base = datetime.strptime(selected_expiry, "%d-%m-%Y")
-        while len(result) < count:
-            base += timedelta(days=7)  # weekly expiry
-            result.append(base.strftime("%d-%m-%Y"))
-    except Exception:
-        pass
-
-    return result
 
 
     idx = expiries.index(selected_expiry)
@@ -682,12 +672,13 @@ c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
-    expiries = get_available_expiries()
-    expiry = st.selectbox(
-        "Select Expiry",
-        expiries,
-        index=len(expiries) - 1
-    )
+    expiry = get_upcoming_expiry()
+
+    if not expiry:
+        st.error("No upcoming expiry found")
+        st.stop()
+
+    st.caption(f"📅 Using expiry: **{expiry}**")
 
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
@@ -843,19 +834,14 @@ if (
     and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
-    expiries_to_collect = get_next_expiries(expiry, count=3)
-
     for sym in ["BTC", "ETH"]:
-        for exp in expiries_to_collect:
-            # 🔴 FETCH LIVE DATA
-            df_live = fetch_live(sym, exp)
-
-            if not df_live.empty:
-                # 🔴 APPEND (NOT OVERWRITE)
-                append_raw(
-                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
-                    df_live
-                )
+        df_live = fetch_live(sym, expiry)
+    
+        if not df_live.empty:
+            append_raw(
+                f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",
+                df_live
+            )
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots appended successfully.")
