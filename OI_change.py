@@ -86,6 +86,18 @@ def get_available_expiries():
 
     return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
 
+def sync_from_github(repo_path, local_path):
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{repo_path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+
+    r = requests.get(url, headers=headers)
+    if r.status_code != 200:
+        return
+
+    content = base64.b64decode(r.json()["content"]).decode()
+    with open(local_path, "w") as f:
+        f.write(content)
+
 
 def get_next_expiries(selected_expiry, count=3):
     expiries = get_available_expiries()
@@ -655,13 +667,12 @@ if (
     expiries_to_collect = get_next_expiries(expiry, count=3)
     
     for sym in ["BTC", "ETH"]:
-        for exp in expiries_to_collect:
-            df = fetch_live(sym, exp)
-            if not df.empty:
-                append_raw(
-                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
-                    df
-                )
+        for exp in get_available_expiries():
+            sync_from_github(
+                f"data/raw/{sym}_{exp}_snapshots.csv",
+                f"{RAW_DIR}/{sym}_{exp}_snapshots.csv"
+            )
+
 
 
     st.session_state.last_push_bucket = bucket
