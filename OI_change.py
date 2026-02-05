@@ -190,7 +190,14 @@ def process_windows(df, gap, symbol, expiry):
     # -------- LAST WINDOW LOGIC --------
     last_csv = times[-1]
     prev_csv = times[-2]
-    now = get_ist_now().replace(second=0, microsecond=0)
+    now_real = get_ist_now().replace(second=0, microsecond=0)
+    
+    # 🔥 normalize NOW onto CSV timeline
+    now = last_csv.replace(
+        hour=now_real.hour,
+        minute=now_real.minute
+    )
+
 
     # Case 1: CSV already has >= gap between last two points
     if last_csv - prev_csv >= gap_td:
