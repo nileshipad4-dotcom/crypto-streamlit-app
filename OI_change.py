@@ -100,7 +100,12 @@ def load_data(symbol, expiry):
         last = t
 
     df["timestamp_IST"] = out
+    
+    # 🔑 CRITICAL FIX: remove duplicate strike rows per timestamp
+    df = df.drop_duplicates(subset=["timestamp_IST", "strike_price"])
+    
     return df
+
 
 # =========================================================
 # WINDOW ENGINE
