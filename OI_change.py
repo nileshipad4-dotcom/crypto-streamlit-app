@@ -100,31 +100,6 @@ def load_data(symbol, expiry):
     df["timestamp_IST"] = out
     return df
 
-
-def inject_live_row(df, symbol, expiry):
-    last_csv = df["timestamp_IST"].max()
-
-    now_real = get_ist_now().replace(second=0, microsecond=0)
-    now = last_csv.replace(
-        hour=now_real.hour,
-        minute=now_real.minute
-    )
-
-    if now <= last_csv:
-        return df
-
-    live = fetch_live(symbol, expiry)
-    if live.empty:
-        return df
-
-    live["timestamp_IST"] = now
-
-    # 🔴 THIS IS THE MISSING LINE
-    live["_row"] = df["_row"].max() + 1
-
-    return pd.concat([df, live], ignore_index=True)
-
-
 # =========================================================
 # WINDOW ENGINE
 # =========================================================
@@ -187,51 +162,23 @@ def build_row(df, t1, t2, live=False):
     }
 
 
-def process_windows(df, gap, symbol, expiry):
+def process_windows(df, gap):
+    rows=[]
+    windows = build_all_windows(df,gap)
 
-    # 1️⃣ Inject live row FIRST
-    df = inject_live_row(df, symbol, expiry)
+    for t1,t2 in windows:
+        r = build_row(df,t1,t2)
+        if r: rows.append(r)
 
-    rows = []
-    gap_td = timedelta(minutes=gap)
-
-    times = (
-        df.sort_values("_row")
-          .drop_duplicates("timestamp_IST")["timestamp_IST"]
-          .tolist()
-    )
-
-    if len(times) < 2:
-        return pd.DataFrame()
-
-    # 2️⃣ GAP WINDOWS — STOP AT SECOND-LAST
-    i = 0
-    while i < len(times) - 2:
-        t1 = times[i]
-        t2 = next((t for t in times[i+1:-1] if t >= t1 + gap_td), None)
-        if not t2:
-            break
-
-        r = build_row(df, t1, t2)
-        if r:
-            rows.append(r)
-
-        i = times.index(t2)
-
-    # 3️⃣ ALWAYS ADD LAST WINDOW (CSV → CSV OR CSV → LIVE)
-    t1 = times[-2]
-    t2 = times[-1]
-
-    is_live = t2 > t1
-    r = build_row(df, t1, t2, live=is_live)
-    if r:
-        rows.append(r)
+    if windows:
+        r = build_row(df, windows[-1][1], df["timestamp_IST"].max(), live=True)
+        if r: rows.append(r)
 
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("_end").drop(columns="_end")
-
     return out
+
 
 # =========================================================
 # SIDE TABLE: LARGE OI EXTRACTOR
@@ -505,7 +452,7 @@ for sym in ["BTC", "ETH"]:
     # Per-symbol default threshold
 
 
-    df = process_windows(load_data(sym, expiry), gap, sym, expiry)
+    df = process_windows(load_data(sym, expiry), gap)
 
     main_col, side_col = st.columns([3, 1])
 
@@ -606,18 +553,11 @@ with col_t:
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
-now_ist_str = get_ist_now().strftime("%H:%M")
-
 with col_c:
     if push_enabled:
-        st.markdown(
-            f"**⏱ Next data in:** `{mm:02d}:{ss:02d}` &nbsp;&nbsp; "
-            f"**🕒 Now:** `{now_ist_str}`"
-        )
+        st.markdown(f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`")
     else:
-        st.markdown(
-            f"⏸ Snapshot push paused &nbsp;&nbsp; **🕒 Now:** `{now_ist_str}`"
-        )
+        st.markdown("⏸ Snapshot push paused")
 
 # Push when countdown is between 02:00 and 03:00
 # i.e. remaining seconds: 120 < remaining < 180
