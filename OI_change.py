@@ -267,7 +267,14 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
         return None
 
     # live snapshot (same structure)
+    # live snapshot (same structure)
     d2 = df_live.copy()
+    
+    # 🔑 FIX: align merge key dtype
+    d1 = d1.copy()
+    d1["strike_price"] = d1["strike_price"].astype(int)
+    d2["strike_price"] = d2["strike_price"].astype(int)
+
 
     m = pd.merge(
         d1,
