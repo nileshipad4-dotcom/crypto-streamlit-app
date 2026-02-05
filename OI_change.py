@@ -70,15 +70,19 @@ def get_delta_price(symbol):
 # =========================================================
 
 def get_available_expiries():
-    expiries = set()
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{RAW_DIR}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(url, headers=headers)
 
-    if not os.path.exists(RAW_DIR):
+    if r.status_code != 200:
         return []
 
-    for f in os.listdir(RAW_DIR):
-        if f.endswith("_snapshots.csv"):
+    expiries = set()
+    for item in r.json():
+        name = item["name"]
+        if name.endswith("_snapshots.csv"):
             try:
-                expiry = f.split("_")[1]
+                expiry = name.split("_")[1]
                 datetime.strptime(expiry, "%d-%m-%Y")
                 expiries.add(expiry)
             except Exception:
@@ -110,14 +114,21 @@ def get_next_expiries(selected_expiry, count=3):
 
 
 def read_csv_from_github(path):
-    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
+    # 🔥 cache buster
+    ts = int(datetime.utcnow().timestamp())
+
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}?t={ts}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+
     r = requests.get(url, headers=headers)
     if r.status_code != 200:
         return pd.DataFrame()
 
     content = base64.b64decode(r.json()["content"]).decode()
     return pd.read_csv(StringIO(content))
+
+
+
 
 # =========================================================
 # LOAD CLEAN OI HISTORY
@@ -178,30 +189,7 @@ def get_latest_csv_time(symbol, expiry):
         return "—"
 
 
-    try:
-        df = pd.read_csv(path, usecols=["timestamp_IST"])
-        if df.empty:
-            return "—"
 
-        raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
-        raw = raw.dropna()
-        if raw.empty:
-            return "—"
-
-        base = datetime(2000, 1, 1)
-        out, last, day = [], None, 0
-
-        for t in raw:
-            if last is not None and t < last:
-                day += 1  # midnight rollover
-            out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
-            last = t
-
-        latest = max(out)
-        return latest.strftime("%H:%M")
-
-    except Exception:
-        return "—"
 
 
 
