@@ -262,7 +262,7 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
         return None
 
     # last snapshot at last_time
-    d1 = df_hist[df_hist["timestamp_IST"] == last_time]
+    d1 = df_hist[df_hist["timestamp_IST"] <= last_time].sort_values("timestamp_IST").tail(1)
     if d1.empty:
         return None
 
