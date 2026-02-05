@@ -568,8 +568,9 @@ def get_ist_now():
 def write_top7_large_oi_csv(sym, df, price):
     """
     Writes top 7 CE and top 7 PE large OI changes
-    within ±5% price range into a single CSV.
+    within ±5% of price into data/raw/<sym>_large_oi_top7.csv
     """
+
     if df.empty or price is None:
         return
 
@@ -584,21 +585,19 @@ def write_top7_large_oi_csv(sym, df, price):
 
     low, high = price * 0.95, price * 1.05
 
-    ce_vals = []
-    pe_vals = []
+    ce_vals, pe_vals = [], []
 
     for _, row in df.iterrows():
         for col in ["MAX CE 1", "MAX CE 2"]:
             s, v = parse(row[col])
-            if s and v and low <= s <= high:
+            if s is not None and low <= s <= high:
                 ce_vals.append((s, v))
 
         for col in ["MAX PE 1", "MAX PE 2"]:
             s, v = parse(row[col])
-            if s and v and low <= s <= high:
+            if s is not None and low <= s <= high:
                 pe_vals.append((s, v))
 
-    # Deduplicate by strike, keep max abs OI
     ce_df = (
         pd.DataFrame(ce_vals, columns=["STRIKE", "DELTA_OI"])
         .sort_values("DELTA_OI", key=lambda x: x.abs(), ascending=False)
@@ -614,10 +613,10 @@ def write_top7_large_oi_csv(sym, df, price):
     )
 
     for _, r in ce_df.iterrows():
-        rows.append(("CE", r.STRIKE, r.DELTA_OI))
+        rows.append(("CE", int(r.STRIKE), int(r.DELTA_OI)))
 
     for _, r in pe_df.iterrows():
-        rows.append(("PE", r.STRIKE, r.DELTA_OI))
+        rows.append(("PE", int(r.STRIKE), int(r.DELTA_OI)))
 
     if not rows:
         return
@@ -626,6 +625,7 @@ def write_top7_large_oi_csv(sym, df, price):
 
     path = f"{RAW_DIR}/{sym}_large_oi_top7.csv"
     out.to_csv(path, index=False)
+
 
 def get_bucket_and_remaining():
     """
