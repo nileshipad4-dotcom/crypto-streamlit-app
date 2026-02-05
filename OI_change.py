@@ -622,6 +622,10 @@ with c_gap:
 # COMMON TIME SELECTION (GLOBAL)
 # ============================================
 
+# ============================================
+# COMMON TIME SELECTION (GLOBAL)
+# ============================================
+
 df_ref = load_data("BTC", expiry)
 
 if df_ref.empty:
@@ -644,8 +648,34 @@ if len(times) < 2:
 # -------------------------------
 # DEFAULTS
 # TS1 = latest
-# TS2 = closest earlier within 10 min
+# TS2 = immediately previous
 # -------------------------------
+
+ts1_default = times[-1]
+ts2_default = times[-2]
+
+# -------------------------------
+# UI
+# -------------------------------
+
+c1, c2 = st.columns(2)
+
+with c1:
+    ts1_hhmm = st.selectbox(
+        "Timestamp 1 (Latest)",
+        times,
+        index=times.index(ts1_default)
+    )
+
+with c2:
+    valid_ts2 = [t for t in times if t < ts1_hhmm]
+
+    ts2_hhmm = st.selectbox(
+        "Timestamp 2 (Earlier)",
+        valid_ts2,
+        index=len(valid_ts2) - 1
+    )
+
 
 def hhmm_to_dt(h):
     return datetime.strptime(h, "%H:%M")
