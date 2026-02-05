@@ -595,6 +595,22 @@ def append_raw(path, df):
 # =========================================================
 # COMMON TIME SELECTION (GLOBAL)
 # =========================================================
+# =========================================================
+# EXPIRY SELECTION (UI)
+# =========================================================
+
+expiries = get_available_expiries()
+
+if not expiries:
+    st.warning("No expiry data available")
+    st.stop()
+
+expiry = st.selectbox(
+    "Select Expiry",
+    expiries,
+    index=len(expiries) - 1
+)
+
 
 df_ref = load_data("BTC", expiry)
 
