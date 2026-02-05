@@ -106,6 +106,31 @@ def load_data(symbol, expiry):
     
     return df
 
+def get_latest_csv_time(symbol, expiry):
+    """
+    Scans CSV for latest timestamp_IST (HH:MM).
+    Returns string like '14:36' or '—' if not found.
+    """
+    path = f"{DATA_DIR}/{symbol}_{expiry}.csv"
+    if not os.path.exists(path):
+        return "—"
+
+    try:
+        df = pd.read_csv(path, usecols=["timestamp_IST"])
+        if df.empty:
+            return "—"
+
+        # Convert to datetime.time safely
+        times = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
+        times = times.dropna()
+
+        if times.empty:
+            return "—"
+
+        return times.max().strftime("%H:%M")
+    except Exception:
+        return "—"
+
 
 # =========================================================
 # WINDOW ENGINE
@@ -566,11 +591,20 @@ with col_t:
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
+latest_btc = get_latest_csv_time("BTC", expiry)
+latest_eth = get_latest_csv_time("ETH", expiry)
+
 with col_c:
     if st.session_state.push_enabled:
-        st.markdown(f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`")
+        st.markdown(
+            f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`  |  "
+            f"**Last CSV:** BTC `{latest_btc}` · ETH `{latest_eth}`"
+        )
     else:
-        st.markdown("⏸ Snapshot push paused")
+        st.markdown(
+            f"⏸ Snapshot push paused  |  "
+            f"**Last CSV:** BTC `{latest_btc}` · ETH `{latest_eth}`"
+        )
 
 if (
     st.session_state.push_enabled
