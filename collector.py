@@ -180,7 +180,7 @@ def compute_max_pain(df):
 def main():
 
     ts = get_ist_time_HHMM()
-    os.makedirs("data", exist_ok=True)
+    os.makedirs("data/raw", exist_ok=True)
 
     expiries = get_expiries()
     selected_expiry = expiries[0]   # Nearest valid expiry
@@ -218,6 +218,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
