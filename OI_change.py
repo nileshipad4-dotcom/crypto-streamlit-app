@@ -81,6 +81,17 @@ def get_available_expiries():
                 pass
     return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
 
+def get_next_expiries(selected_expiry, count=3):
+    """
+    Returns selected expiry + next (count-1) expiries.
+    """
+    expiries = get_available_expiries()
+    if selected_expiry not in expiries:
+        return [selected_expiry]
+
+    idx = expiries.index(selected_expiry)
+    return expiries[idx : idx + count]
+
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
@@ -621,10 +632,17 @@ if (
     and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
+    expiries_to_collect = get_next_expiries(expiry, count=3)
+    
     for sym in ["BTC", "ETH"]:
-        df = fetch_live(sym, expiry)
-        if not df.empty:
-            append_raw(f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv", df)
+        for exp in expiries_to_collect:
+            df = fetch_live(sym, exp)
+            if not df.empty:
+                append_raw(
+                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
+                    df
+                )
+
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
