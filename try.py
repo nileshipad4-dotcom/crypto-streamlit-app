@@ -374,6 +374,44 @@ def extract_big_oi(df, threshold=10000):
 
     return ce_df, pe_df
 
+
+def write_large_oi_csv(sym, df, threshold):
+    """
+    Writes Large OI Changes (CE + PE) into CSV.
+    Adds TIME (HH:MM) and avoids duplicate writes.
+    """
+
+    rows = []
+
+    if not df.empty:
+        # Latest window time (end of last row)
+        latest_time = df.iloc[-1]["TIME"].split(" - ")[-1].replace(" ⏳", "")
+
+        ce_df, pe_df = extract_big_oi(df, threshold=threshold)
+
+        for _, r in ce_df.iterrows():
+            rows.append((latest_time, "CE", int(r.Strike), int(r["ΔOI"])))
+
+        for _, r in pe_df.iterrows():
+            rows.append((latest_time, "PE", int(r.Strike), int(r["ΔOI"])))
+
+    out = pd.DataFrame(rows, columns=["TIME", "SIDE", "STRIKE", "OI"])
+
+    path = f"{RAW_DIR}/{sym}_large_oi_changes.csv"
+
+    # ---------- DEDUPLICATION ----------
+    if os.path.exists(path):
+        try:
+            old = pd.read_csv(path)
+            # If data identical, do nothing
+            if old.equals(out):
+                return
+        except Exception:
+            pass
+
+    # Write only if new / changed
+    out.to_csv(path, index=False)
+
 def mark_price_neighbors(df, price):
     """
     Returns set of row indices to highlight based on price position.
@@ -565,60 +603,6 @@ def fetch_live(symbol, expiry):
 def get_ist_now():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-def write_top7_large_oi_csv(sym, df, price):
-    """
-    Writes top 7 CE and top 7 PE large OI changes
-    within ±5% of price into data/raw/<sym>_large_oi_top7.csv
-    """
-
-    rows = []
-
-    def parse(cell):
-        try:
-            s, v = cell.split(":-")
-            return int(s.strip()), int(v.strip())
-        except Exception:
-            return None, None
-
-    if not df.empty and price is not None:
-        low, high = price * 0.95, price * 1.05
-        ce_vals, pe_vals = [], []
-
-        for _, row in df.iterrows():
-            for col in ["MAX CE 1", "MAX CE 2"]:
-                s, v = parse(row[col])
-                if s is not None and low <= s <= high:
-                    ce_vals.append((s, v))
-
-            for col in ["MAX PE 1", "MAX PE 2"]:
-                s, v = parse(row[col])
-                if s is not None and low <= s <= high:
-                    pe_vals.append((s, v))
-
-        ce_df = (
-            pd.DataFrame(ce_vals, columns=["STRIKE", "DELTA_OI"])
-            .sort_values("DELTA_OI", key=lambda x: x.abs(), ascending=False)
-            .drop_duplicates("STRIKE")
-            .head(7)
-        )
-
-        pe_df = (
-            pd.DataFrame(pe_vals, columns=["STRIKE", "DELTA_OI"])
-            .sort_values("DELTA_OI", key=lambda x: x.abs(), ascending=False)
-            .drop_duplicates("STRIKE")
-            .head(7)
-        )
-
-        for _, r in ce_df.iterrows():
-            rows.append(("CE", int(r.STRIKE), int(r.DELTA_OI)))
-
-        for _, r in pe_df.iterrows():
-            rows.append(("PE", int(r.STRIKE), int(r.DELTA_OI)))
-
-    # 🔑 ALWAYS WRITE FILE (even if rows is empty)
-    out = pd.DataFrame(rows, columns=["SIDE", "STRIKE", "DELTA_OI"])
-    path = f"{RAW_DIR}/{sym}_large_oi_top7.csv"
-    out.to_csv(path, index=False)
 
 def get_bucket_and_remaining():
     """
@@ -740,10 +724,8 @@ for sym in ["BTC", "ETH"]:
 
 
     df = process_windows(load_data(sym, expiry), gap)
+    write_large_oi_csv(sym, df, FIXED_THRESHOLDS[sym])
 
-    price = btc_p if sym == "BTC" else eth_p
-
-    write_top7_large_oi_csv(sym, df, price)
 
     main_col, side_col = st.columns([3, 1])
 
