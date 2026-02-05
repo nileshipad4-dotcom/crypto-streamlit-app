@@ -95,6 +95,8 @@ def load_data(symbol, expiry):
 
     df["timestamp_IST"] = out
     return df
+
+
 def inject_live_row(df, symbol, expiry):
     last_csv = df["timestamp_IST"].max()
 
@@ -112,6 +114,10 @@ def inject_live_row(df, symbol, expiry):
         return df
 
     live["timestamp_IST"] = now
+
+    # 🔴 THIS IS THE MISSING LINE
+    live["_row"] = df["_row"].max() + 1
+
     return pd.concat([df, live], ignore_index=True)
 
 
