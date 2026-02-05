@@ -311,6 +311,16 @@ def build_oi_vol_delta(df, t1, t2):
 
     return out.sort_values("STRIKE").reset_index(drop=True)
 
+# =========================================================
+# WINDOW GAP SELECTION (UI)
+# =========================================================
+
+gap = st.selectbox(
+    "Min Gap (minutes)",
+    [5, 10, 15, 20, 30, 45, 60],
+    index=2  # default = 15 min
+)
+
 def process_windows(df, gap):
     rows=[]
     windows = build_all_windows(df,gap)
