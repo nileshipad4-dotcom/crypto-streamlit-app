@@ -749,10 +749,6 @@ for sym in ["BTC", "ETH"]:
     st.caption(f"📤 Large OI CSV pushed to GitHub at {get_ist()}")
 
 
-    if updated:
-        st.caption(f"📝 Large OI CSV updated at {get_ist()}")
-    else:
-        st.caption("🟡 Large OI CSV unchanged")
 
 
     main_col, side_col = st.columns([3, 1])
