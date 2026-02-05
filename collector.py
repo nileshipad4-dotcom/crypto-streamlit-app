@@ -198,7 +198,8 @@ def main():
         df = compute_max_pain(df)
 
         # 🔴 EXPIRY-SPECIFIC FILE
-        out_path = f"data/raw/{underlying}_{selected_expiry}.csv"
+        out_path = f"data/raw/{underlying}_{selected_expiry}_snapshots.csv"
+
 
 
         file_exists = os.path.isfile(out_path) and os.path.getsize(out_path) > 0
@@ -217,5 +218,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
