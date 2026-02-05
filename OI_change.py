@@ -95,6 +95,25 @@ def load_data(symbol, expiry):
 
     df["timestamp_IST"] = out
     return df
+def inject_live_row(df, symbol, expiry):
+    last_csv = df["timestamp_IST"].max()
+
+    now_real = get_ist_now().replace(second=0, microsecond=0)
+    now = last_csv.replace(
+        hour=now_real.hour,
+        minute=now_real.minute
+    )
+
+    if now <= last_csv:
+        return df
+
+    live = fetch_live(symbol, expiry)
+    if live.empty:
+        return df
+
+    live["timestamp_IST"] = now
+    return pd.concat([df, live], ignore_index=True)
+
 
 # =========================================================
 # WINDOW ENGINE
@@ -160,8 +179,12 @@ def build_row(df, t1, t2, live=False):
 
 def process_windows(df, gap, symbol, expiry):
 
+    # 🔥 Inject live data FIRST
+    df = inject_live_row(df, symbol, expiry)
+
     rows = []
     gap_td = timedelta(minutes=gap)
+
 
     # Sort & unique times
     times = (
@@ -205,18 +228,7 @@ def process_windows(df, gap, symbol, expiry):
         if r:
             rows.append(r)
 
-    # Case 2: CSV gap < gap → compare with real time
-    elif now > last_csv:
-        # 🔴 FETCH REAL LIVE DATA
-        live = fetch_live(symbol, expiry)
-        if not live.empty:
-            live["timestamp_IST"] = now
-    
-            live_df = pd.concat([df, live], ignore_index=True)
-    
-            r = build_row(live_df, last_csv, now, live=True)
-            if r:
-                rows.append(r)
+
     
     
     out = pd.DataFrame(rows)
