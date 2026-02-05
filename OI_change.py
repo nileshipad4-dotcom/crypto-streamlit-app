@@ -70,19 +70,15 @@ def get_delta_price(symbol):
 # =========================================================
 
 def get_available_expiries():
-    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{RAW_DIR}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    r = requests.get(url, headers=headers)
+    expiries = set()
 
-    if r.status_code != 200:
+    if not os.path.exists(RAW_DIR):
         return []
 
-    expiries = set()
-    for item in r.json():
-        name = item["name"]
-        if name.endswith("_snapshots.csv"):
+    for f in os.listdir(RAW_DIR):
+        if f.endswith("_snapshots.csv"):
             try:
-                expiry = name.split("_")[1]
+                expiry = f.split("_")[1]
                 datetime.strptime(expiry, "%d-%m-%Y")
                 expiries.add(expiry)
             except Exception:
@@ -112,37 +108,12 @@ def get_next_expiries(selected_expiry, count=3):
     idx = expiries.index(selected_expiry)
     return expiries[idx : idx + count]
 
-
-def read_csv_from_github(path):
-    # 🔥 cache buster
-    ts = int(datetime.utcnow().timestamp())
-
-    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}?t={ts}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-
-    r = requests.get(url, headers=headers)
-    if r.status_code != 200:
-        return pd.DataFrame()
-
-    content = base64.b64decode(r.json()["content"]).decode()
-    return pd.read_csv(StringIO(content))
-
-def get_available_times(df):
-    times = (
-        df.sort_values("_row")["timestamp_IST"]
-        .drop_duplicates()
-        .tolist()
-    )
-    return times
-
-
-
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
 
 def load_data(symbol, expiry):
-    df = read_csv_from_github(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
+    df = pd.read_csv(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
     df["_row"] = range(len(df))
 
     raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
@@ -163,19 +134,21 @@ def load_data(symbol, expiry):
     return df
 
 def get_latest_csv_time(symbol, expiry):
+    """
+    Returns the true latest timestamp from CSV,
+    correctly handling midnight rollover.
+    """
+    path = f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
+    if not os.path.exists(path):
+        return "—"
+
     try:
-        df = read_csv_from_github(
-            f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
-        )
-        if df.empty or "timestamp_IST" not in df:
+        df = pd.read_csv(path, usecols=["timestamp_IST"])
+        if df.empty:
             return "—"
 
-        raw = pd.to_datetime(
-            df["timestamp_IST"],
-            format="%H:%M",
-            errors="coerce"
-        ).dropna()
-
+        raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
+        raw = raw.dropna()
         if raw.empty:
             return "—"
 
@@ -184,19 +157,15 @@ def get_latest_csv_time(symbol, expiry):
 
         for t in raw:
             if last is not None and t < last:
-                day += 1
-            out.append(
-                base + timedelta(days=day, hours=t.hour, minutes=t.minute)
-            )
+                day += 1  # midnight rollover
+            out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
             last = t
 
-        return max(out).strftime("%H:%M")
+        latest = max(out)
+        return latest.strftime("%H:%M")
 
     except Exception:
         return "—"
-
-
-
 
 
 
@@ -269,28 +238,6 @@ def build_row(df, t1, t2, live=False):
         "_end": t2
     }
 
-def build_oi_vol_delta(df, t1, t2):
-    d1 = df[df["timestamp_IST"] == t1]
-    d2 = df[df["timestamp_IST"] == t2]
-
-    if d1.empty or d2.empty:
-        return pd.DataFrame()
-
-    m = pd.merge(
-        d1, d2,
-        on="strike_price",
-        suffixes=("_1", "_2")
-    )
-
-    out = pd.DataFrame({
-        "STRIKE": m["strike_price"],
-        "Δ OI": (m["call_oi_2"].fillna(0) + m["put_oi_2"].fillna(0))
-               - (m["call_oi_1"].fillna(0) + m["put_oi_1"].fillna(0)),
-        "Δ VOL": (m["call_volume_2"].fillna(0) + m["put_volume_2"].fillna(0))
-                - (m["call_volume_1"].fillna(0) + m["put_volume_1"].fillna(0)),
-    })
-
-    return out.sort_values("STRIKE").reset_index(drop=True)
 
 def process_windows(df, gap):
     rows=[]
@@ -370,27 +317,6 @@ def mark_price_neighbors(df, price):
     return highlight
 
 
-
-def style_strike_table(df, price):
-    styles = pd.DataFrame("", index=df.index, columns=df.columns)
-
-    strikes = df["STRIKE"].values
-
-    below = df[df["STRIKE"] <= price]
-    above = df[df["STRIKE"] >= price]
-
-    if not below.empty and not above.empty:
-        low_i = below.index[-1]
-        high_i = above.index[0]
-
-        styles.loc[low_i, "STRIKE"] += "font-weight:bold;color:blue;"
-        styles.loc[high_i, "STRIKE"] += "font-weight:bold;color:blue;"
-
-    nearest = df.iloc[(df["STRIKE"] - price).abs().argsort()[:1]].index
-    styles.loc[nearest, "STRIKE"] += "font-weight:bold;color:orange;"
-
-    return df.style.apply(lambda _: styles, axis=None)
-
 # =========================================================
 # HIGHLIGHTING
 # =========================================================
@@ -401,11 +327,6 @@ def highlight_table(df, price):
         "TIME","MAX CE 1","MAX CE 2","Σ ΔCE OI",
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
     ]
-
-
-    # 🔑 SAFETY GUARD (THIS FIXES YOUR ERROR)
-    if df.empty or not all(c in df.columns for c in cols):
-        return df
 
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
@@ -741,50 +662,3 @@ if (
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
-
-
-st.markdown("---")
-st.header("📊 OI & Volume Delta (Custom Time Comparison)")
-
-for sym in ["BTC", "ETH"]:
-    st.subheader(sym)
-
-    df_full = load_data(sym, expiry)
-    times = get_available_times(df_full)
-
-    if len(times) < 2:
-        st.info("Not enough data")
-        continue
-
-    # defaults
-    t1_default = times[-1]
-    t2_default = next(
-        (t for t in times if t >= t1_default + timedelta(minutes=10)),
-        times[-1]
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        t1 = st.selectbox(
-            f"{sym} Timestamp 1",
-            times,
-            index=times.index(t1_default),
-            key=f"{sym}_t1"
-        )
-    with c2:
-        t2 = st.selectbox(
-            f"{sym} Timestamp 2",
-            times,
-            index=times.index(t2_default),
-            key=f"{sym}_t2"
-        )
-
-    delta_df = build_oi_vol_delta(df_full, t1, t2)
-
-    price = btc_p if sym == "BTC" else eth_p
-
-    st.dataframe(
-        style_strike_table(delta_df, price),
-        use_container_width=True,
-        height=420
-    )
