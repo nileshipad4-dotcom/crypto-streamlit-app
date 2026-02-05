@@ -328,6 +328,10 @@ def highlight_table(df, price):
         "MAX PE 1","MAX PE 2","Σ ΔPE OI","Δ (PE − CE)"
     ]
 
+    # 🔑 SAFETY GUARD (THIS FIXES YOUR ERROR)
+    if df.empty or not all(c in df.columns for c in cols):
+        return df
+
     styles = pd.DataFrame("", index=df.index, columns=cols)
 
     # ---------- EXISTING HIGHLIGHTS ----------
