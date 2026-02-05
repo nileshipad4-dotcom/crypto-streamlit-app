@@ -158,7 +158,8 @@ def build_row(df, t1, t2, live=False):
     }
 
 
-def process_windows(df, gap):
+def process_windows(df, gap, symbol, expiry):
+
     rows = []
     gap_td = timedelta(minutes=gap)
 
@@ -199,16 +200,18 @@ def process_windows(df, gap):
 
     # Case 2: CSV gap < gap → compare with real time
     elif now - last_csv >= gap_td:
-        # inject synthetic "now" row
-        live_df = df.copy()
-        latest = live_df[live_df["timestamp_IST"] == last_csv].copy()
-        latest["timestamp_IST"] = now
-        live_df = pd.concat([live_df, latest], ignore_index=True)
-
-        r = build_row(live_df, last_csv, now, live=True)
-        if r:
-            rows.append(r)
-
+        # 🔴 FETCH REAL LIVE DATA
+        live = fetch_live(symbol, expiry)
+        if not live.empty:
+            live["timestamp_IST"] = now
+    
+            live_df = pd.concat([df, live], ignore_index=True)
+    
+            r = build_row(live_df, last_csv, now, live=True)
+            if r:
+                rows.append(r)
+    
+    
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("_end").drop(columns="_end")
@@ -488,7 +491,7 @@ for sym in ["BTC", "ETH"]:
     # Per-symbol default threshold
 
 
-    df = process_windows(load_data(sym, expiry), gap)
+    df = process_windows(load_data(sym, expiry), gap, sym, expiry)
 
     main_col, side_col = st.columns([3, 1])
 
