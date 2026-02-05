@@ -376,16 +376,8 @@ def extract_big_oi(df, threshold=10000):
 
 
 def write_large_oi_csv(sym, df, threshold):
-    """
-    Writes Large OI Changes into CSV.
-    Always writes the file.
-    Adds HH:MM update time.
-    Prevents duplicate rewrites.
-    """
-
     rows = []
 
-    # determine HH:MM (IST now)
     update_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
     if not df.empty:
@@ -399,21 +391,14 @@ def write_large_oi_csv(sym, df, threshold):
 
     out = pd.DataFrame(rows, columns=["TIME", "SIDE", "STRIKE", "OI"])
 
-    path = f"{RAW_DIR}/{sym}_large_oi_changes.csv"
+    local_path = f"{RAW_DIR}/{sym}_large_oi_changes.csv"
+    out.to_csv(local_path, index=False)
 
-    # --------- DEDUPLICATION ---------
-    if os.path.exists(path):
-        try:
-            old = pd.read_csv(path)
-            if old.equals(out):
-                return False  # no update
-        except Exception:
-            pass
-
-    out.to_csv(path, index=False)
-    return True
-
-
+    # 🔥 PUSH TO GITHUB (THIS MAKES IT VISIBLE)
+    push_csv_to_github(
+        local_path,
+        f"data/raw/{sym}_large_oi_changes.csv"
+    )
 
 def mark_price_neighbors(df, price):
     """
@@ -642,6 +627,38 @@ def append_raw(path, df):
     if sha: payload["sha"]=sha
     requests.put(url,headers=headers,json=payload)
 
+def push_csv_to_github(local_path, repo_path):
+    """
+    Push a local CSV file to GitHub so it is visible in the repo.
+    """
+    if not os.path.exists(local_path):
+        return
+
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{repo_path}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    with open(local_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+
+    # Check if file already exists (to get sha)
+    r = requests.get(url, headers=headers)
+    sha = None
+    if r.status_code == 200:
+        sha = r.json()["sha"]
+
+    payload = {
+        "message": "update large OI changes csv",
+        "content": content,
+        "branch": GITHUB_BRANCH
+    }
+
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
 
 # =========================================================
 # COMMON TIME SELECTION (GLOBAL)
@@ -728,8 +745,9 @@ for sym in ["BTC", "ETH"]:
 
     df = process_windows(load_data(sym, expiry), gap)
 
+    write_large_oi_csv(sym, df, FIXED_THRESHOLDS[sym])
+    st.caption(f"📤 Large OI CSV pushed to GitHub at {get_ist()}")
 
-    updated = write_large_oi_csv(sym, df, FIXED_THRESHOLDS[sym])
 
     if updated:
         st.caption(f"📝 Large OI CSV updated at {get_ist()}")
