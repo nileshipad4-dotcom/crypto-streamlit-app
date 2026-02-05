@@ -99,7 +99,7 @@ def sync_from_github(repo_path, local_path):
         f.write(content)
 
 
-def get_next_expiries(selected_expiry, count=3):
+def get_next_expiries(selected_expiry, count=1):
     expiries = get_available_expiries()
 
     # Always include selected expiry
