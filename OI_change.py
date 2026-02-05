@@ -825,7 +825,7 @@ for sym in ["BTC", "ETH"]:
         continue
 
 
-    delta_df = build_oi_vol_delta(df_full, ts1, ts2)
+    delta_df = build_oi_vol_delta(df_full, ts2, ts1)
 
     if delta_df.empty:
         st.info("No delta data for selected timestamps")
