@@ -179,10 +179,10 @@ def get_latest_csv_time(symbol, expiry):
     except Exception:
         return "—"
 
-def fetch_live_option_chain_simple(symbol, expiry):
+def fetch_live_option_chain_totals(symbol, expiry):
     """
-    Fetch live option chain and return simplified table:
-    Strike | Call OI | Call Vol | Put OI | Put Vol
+    Fetch live option chain with TOTAL OI and TOTAL VOLUME
+    (no deltas, no calculations)
     """
     url = (
         f"{DELTA_API}"
@@ -212,7 +212,7 @@ def fetch_live_option_chain_simple(symbol, expiry):
         df[df["contract_type"] == "call_options"]
         .rename(columns={
             "oi_contracts": "Call OI",
-            "volume": "Call Vol"
+            "volume": "Call Volume"
         })
         .drop(columns=["contract_type"])
     )
@@ -221,7 +221,7 @@ def fetch_live_option_chain_simple(symbol, expiry):
         df[df["contract_type"] == "put_options"]
         .rename(columns={
             "oi_contracts": "Put OI",
-            "volume": "Put Vol"
+            "volume": "Put Volume"
         })
         .drop(columns=["contract_type"])
     )
@@ -241,14 +241,13 @@ def fetch_live_option_chain_simple(symbol, expiry):
         .astype({
             "Strike": int,
             "Call OI": int,
-            "Call Vol": int,
+            "Call Volume": int,
             "Put OI": int,
-            "Put Vol": int
+            "Put Volume": int
         })
         .sort_values("Strike")
         .reset_index(drop=True)
     )
-
 
 # =========================================================
 # WINDOW ENGINE
@@ -746,17 +745,19 @@ if (
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
 
+
+
 # =========================================================
-# LIVE OPTION CHAIN (SIMPLE VIEW)
+# LIVE OPTION CHAIN (TOTAL OI & VOLUME)
 # =========================================================
 
 st.markdown("---")
-st.header("📡 Live Option Chain (Delta)")
+st.header("📡 Live Option Chain (Totals)")
 
 for sym in ["BTC", "ETH"]:
     st.subheader(f"{sym} Option Chain")
 
-    live_df = fetch_live_option_chain_simple(sym, expiry)
+    live_df = fetch_live_option_chain_totals(sym, expiry)
 
     if live_df.empty:
         st.info("No live option chain data available")
