@@ -675,24 +675,6 @@ for sym in ["BTC", "ETH"]:
 
 
 
-    if not df.empty:
-        times=df["TIME"].tolist()
-        f,t = st.columns(2)
-        with f:
-            t1=st.selectbox(f"From ({sym})",times,index=0,key=f"{sym}f")
-        with t:
-            t2=st.selectbox(f"To ({sym})",times,index=len(times)-1,key=f"{sym}t")
-
-        i1,i2=times.index(t1),times.index(t2)
-        s=df.iloc[min(i1,i2):max(i1,i2)+1]
-
-        ce,pe,d = int(s["Σ ΔCE OI"].sum()), int(s["Σ ΔPE OI"].sum()), int(s["Δ (PE − CE)"].sum())
-        def c(v): return "red" if v>0 else "green" if v<0 else "black"
-
-        a,b,c3 = st.columns(3)
-        a.markdown(f"**△ CE:** <span style='color:{c(ce)}'>{ce}</span>",unsafe_allow_html=True)
-        b.markdown(f"**△ PE:** <span style='color:{c(pe)}'>{pe}</span>",unsafe_allow_html=True)
-        c3.markdown(f"**△ (PE − CE):** <span style='color:{c(d)}'>{d}</span>",unsafe_allow_html=True)
 
 # =========================================================
 # RAW PUSH
