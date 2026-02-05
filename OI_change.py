@@ -199,7 +199,7 @@ def process_windows(df, gap, symbol, expiry):
             rows.append(r)
 
     # Case 2: CSV gap < gap → compare with real time
-    elif now - last_csv >= gap_td:
+    elif now > last_csv:
         # 🔴 FETCH REAL LIVE DATA
         live = fetch_live(symbol, expiry)
         if not live.empty:
