@@ -179,6 +179,75 @@ def get_latest_csv_time(symbol, expiry):
     except Exception:
         return "—"
 
+def fetch_live_option_chain_simple(symbol, expiry):
+    """
+    Fetch live option chain and return simplified table:
+    Strike | Call OI | Call Vol | Put OI | Put Vol
+    """
+    url = (
+        f"{DELTA_API}"
+        f"?contract_types=call_options,put_options"
+        f"&underlying_asset_symbols={symbol}"
+        f"&expiry_date={expiry}"
+    )
+
+    r = requests.get(url, timeout=15)
+    if r.status_code != 200:
+        return pd.DataFrame()
+
+    data = r.json().get("result", [])
+    if not data:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(data)
+
+    df = df[[
+        "strike_price",
+        "contract_type",
+        "oi_contracts",
+        "volume"
+    ]]
+
+    calls = (
+        df[df["contract_type"] == "call_options"]
+        .rename(columns={
+            "oi_contracts": "Call OI",
+            "volume": "Call Vol"
+        })
+        .drop(columns=["contract_type"])
+    )
+
+    puts = (
+        df[df["contract_type"] == "put_options"]
+        .rename(columns={
+            "oi_contracts": "Put OI",
+            "volume": "Put Vol"
+        })
+        .drop(columns=["contract_type"])
+    )
+
+    out = pd.merge(
+        calls,
+        puts,
+        on="strike_price",
+        how="outer"
+    )
+
+    out = out.rename(columns={"strike_price": "Strike"})
+
+    return (
+        out
+        .fillna(0)
+        .astype({
+            "Strike": int,
+            "Call OI": int,
+            "Call Vol": int,
+            "Put OI": int,
+            "Put Vol": int
+        })
+        .sort_values("Strike")
+        .reset_index(drop=True)
+    )
 
 
 # =========================================================
@@ -676,3 +745,25 @@ if (
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
+
+# =========================================================
+# LIVE OPTION CHAIN (SIMPLE VIEW)
+# =========================================================
+
+st.markdown("---")
+st.header("📡 Live Option Chain (Delta)")
+
+for sym in ["BTC", "ETH"]:
+    st.subheader(f"{sym} Option Chain")
+
+    live_df = fetch_live_option_chain_simple(sym, expiry)
+
+    if live_df.empty:
+        st.info("No live option chain data available")
+        continue
+
+    st.dataframe(
+        live_df,
+        use_container_width=True,
+        height=420
+    )
