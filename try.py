@@ -377,40 +377,43 @@ def extract_big_oi(df, threshold=10000):
 
 def write_large_oi_csv(sym, df, threshold):
     """
-    Writes Large OI Changes (CE + PE) into CSV.
-    Adds TIME (HH:MM) and avoids duplicate writes.
+    Writes Large OI Changes into CSV.
+    Always writes the file.
+    Adds HH:MM update time.
+    Prevents duplicate rewrites.
     """
 
     rows = []
 
-    if not df.empty:
-        # Latest window time (end of last row)
-        latest_time = df.iloc[-1]["TIME"].split(" - ")[-1].replace(" ⏳", "")
+    # determine HH:MM (IST now)
+    update_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
-        ce_df, pe_df = extract_big_oi(df, threshold=threshold)
+    if not df.empty:
+        ce_df, pe_df = extract_big_oi(df, threshold)
 
         for _, r in ce_df.iterrows():
-            rows.append((latest_time, "CE", int(r.Strike), int(r["ΔOI"])))
+            rows.append((update_time, "CE", int(r.Strike), int(r["ΔOI"])))
 
         for _, r in pe_df.iterrows():
-            rows.append((latest_time, "PE", int(r.Strike), int(r["ΔOI"])))
+            rows.append((update_time, "PE", int(r.Strike), int(r["ΔOI"])))
 
     out = pd.DataFrame(rows, columns=["TIME", "SIDE", "STRIKE", "OI"])
 
     path = f"{RAW_DIR}/{sym}_large_oi_changes.csv"
 
-    # ---------- DEDUPLICATION ----------
+    # --------- DEDUPLICATION ---------
     if os.path.exists(path):
         try:
             old = pd.read_csv(path)
-            # If data identical, do nothing
             if old.equals(out):
-                return
+                return False  # no update
         except Exception:
             pass
 
-    # Write only if new / changed
     out.to_csv(path, index=False)
+    return True
+
+
 
 def mark_price_neighbors(df, price):
     """
@@ -724,7 +727,14 @@ for sym in ["BTC", "ETH"]:
 
 
     df = process_windows(load_data(sym, expiry), gap)
-    write_large_oi_csv(sym, df, FIXED_THRESHOLDS[sym])
+
+
+    updated = write_large_oi_csv(sym, df, FIXED_THRESHOLDS[sym])
+
+    if updated:
+        st.caption(f"📝 Large OI CSV updated at {get_ist()}")
+    else:
+        st.caption("🟡 Large OI CSV unchanged")
 
 
     main_col, side_col = st.columns([3, 1])
