@@ -136,9 +136,25 @@ def load_data(symbol, expiry):
 
 def resolve_ts(df, hhmm):
     """
-    Maps HH:MM back to the real datetime timestamp (midnight-safe)
+    Resolve HH:MM to the nearest earlier real timestamp.
+    Safe for missing minutes (ETH gaps).
     """
-    return df[df["ts_hhmm"] == hhmm]["timestamp_IST"].iloc[-1]
+    subset = df[df["ts_hhmm"] == hhmm]
+
+    if not subset.empty:
+        return subset["timestamp_IST"].iloc[-1]
+
+    # 🔑 FALLBACK: take the latest timestamp BEFORE hhmm
+    target = datetime.strptime(hhmm, "%H:%M").time()
+
+    earlier = df[df["timestamp_IST"].dt.time <= target]
+
+    if earlier.empty:
+        return None
+
+    return earlier.sort_values("timestamp_IST")["timestamp_IST"].iloc[-1]
+
+
 
 def get_latest_csv_time(symbol, expiry):
     """
@@ -810,8 +826,13 @@ for sym in ["BTC", "ETH"]:
         continue
 
     # resolve real timestamps from HH:MM
-    ts1 = resolve_ts(df_full, ts1_hhmm)  # latest
-    ts2 = resolve_ts(df_full, ts2_hhmm)  # earlier (≤10 min)
+    ts1 = resolve_ts(df_full, ts1_hhmm)
+    ts2 = resolve_ts(df_full, ts2_hhmm)
+    
+    if ts1 is None or ts2 is None:
+        st.info("No matching timestamps for this symbol")
+        continue
+
 
     delta_df = build_oi_vol_delta(df_full, ts1, ts2)
 
