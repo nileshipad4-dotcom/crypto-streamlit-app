@@ -307,8 +307,21 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
     ce = agg.sort_values("CE", ascending=False)
     pe = agg.sort_values("PE", ascending=False)
 
-    if len(ce) < 2 or len(pe) < 2:
+    # 🔑 LIVE rows may not have full depth — allow partial
+    if ce.empty or pe.empty:
         return None
+    
+    # fallback if only 1 strike exists
+    def safe_row(df, idx):
+        if len(df) > idx:
+            return df.iloc[idx]
+        return df.iloc[0]
+    
+    ce1 = safe_row(ce, 0)
+    ce2 = safe_row(ce, 1)
+    pe1 = safe_row(pe, 0)
+    pe2 = safe_row(pe, 1)
+
 
     sum_ce = int(agg["CE"].sum() / 100)
     sum_pe = int(agg["PE"].sum() / 100)
