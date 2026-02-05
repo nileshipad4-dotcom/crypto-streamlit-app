@@ -179,6 +179,7 @@ def get_latest_csv_time(symbol, expiry):
     except Exception:
         return "—"
 
+
 def fetch_live_option_chain_totals(symbol, expiry):
     """
     Fetch live option chain with TOTAL OI and TOTAL VOLUME
@@ -252,6 +253,71 @@ def fetch_live_option_chain_totals(symbol, expiry):
 # =========================================================
 # WINDOW ENGINE
 # =========================================================
+def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
+    """
+    Compare last CSV snapshot vs LIVE snapshot and
+    return one synthetic row (dict) for main table.
+    """
+    if df_hist.empty or df_live.empty:
+        return None
+
+    # last snapshot at last_time
+    d1 = df_hist[df_hist["timestamp_IST"] == last_time]
+    if d1.empty:
+        return None
+
+    # live snapshot (same structure)
+    d2 = df_live.copy()
+
+    m = pd.merge(
+        d1,
+        d2,
+        on="strike_price",
+        suffixes=("_1", "_2")
+    )
+
+    if m.empty:
+        return None
+
+    # ignore extreme strikes (same logic as build_row)
+    strikes = sorted(m["strike_price"].unique())
+    if len(strikes) <= 4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
+
+    # delta from last snapshot → live
+    m["CE"] = m["call_oi_2"] - m["call_oi_1"]
+    m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+
+    agg = (
+        m.groupby("strike_price", as_index=False)
+         .agg({"CE": "sum", "PE": "sum"})
+    )
+
+    ce = agg.sort_values("CE", ascending=False)
+    pe = agg.sort_values("PE", ascending=False)
+
+    if len(ce) < 2 or len(pe) < 2:
+        return None
+
+    sum_ce = int(agg["CE"].sum() / 100)
+    sum_pe = int(agg["PE"].sum() / 100)
+
+    return {
+        "TIME": f"{last_time:%H:%M} → LIVE",
+        "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
+        "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
+        "Σ ΔCE OI": sum_ce,
+        "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
+        "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
+        "Σ ΔPE OI": sum_pe,
+        "Δ (PE − CE)": sum_pe - sum_ce,
+        "_ce1": ce.iloc[0].CE,
+        "_ce2": ce.iloc[1].CE,
+        "_pe1": pe.iloc[0].PE,
+        "_pe2": pe.iloc[1].PE,
+    }
+
 
 def build_all_windows(df, gap):
     times = (
@@ -610,9 +676,28 @@ with c_gap:
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
     # Per-symbol default threshold
+    
+    df_hist = load_data(sym, expiry)
+    df = process_windows(df_hist, gap)
+    
+    # ---------- ADD LIVE ROW ----------
+    if not df.empty:
+        last_time = df_hist["timestamp_IST"].max()
+    
+        df_live = fetch_live(sym, expiry)
+    
+        live_row = build_live_row_from_last_snapshot(
+            df_hist,
+            df_live,
+            last_time
+        )
+    
+        if live_row:
+            df = pd.concat(
+                [df, pd.DataFrame([live_row])],
+                ignore_index=True
+            )
 
-
-    df = process_windows(load_data(sym, expiry), gap)
 
     main_col, side_col = st.columns([3, 1])
 
