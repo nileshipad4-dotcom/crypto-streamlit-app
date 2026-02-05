@@ -732,18 +732,22 @@ if (
     and st.session_state.last_push_bucket != bucket
 ):
     expiries_to_collect = get_next_expiries(expiry, count=3)
-    
+
     for sym in ["BTC", "ETH"]:
-        for exp in get_available_expiries():
-            sync_from_github(
-                f"data/raw/{sym}_{exp}_snapshots.csv",
-                f"{RAW_DIR}/{sym}_{exp}_snapshots.csv"
-            )
+        for exp in expiries_to_collect:
+            # 🔴 FETCH LIVE DATA
+            df_live = fetch_live(sym, exp)
 
-
+            if not df_live.empty:
+                # 🔴 APPEND (NOT OVERWRITE)
+                append_raw(
+                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
+                    df_live
+                )
 
     st.session_state.last_push_bucket = bucket
-    st.success("Raw snapshots pushed successfully.")
+    st.success("Raw snapshots appended successfully.")
+
 
 
 
