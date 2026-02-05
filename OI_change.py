@@ -168,6 +168,13 @@ def get_latest_csv_time(symbol, expiry):
         return "—"
 
 
+def get_available_times(df):
+    times = (
+        df.sort_values("_row")["timestamp_IST"]
+        .drop_duplicates()
+        .tolist()
+    )
+    return times
 
 # =========================================================
 # WINDOW ENGINE
@@ -237,6 +244,29 @@ def build_row(df, t1, t2, live=False):
         "_pe2": pe.iloc[1].PE,
         "_end": t2
     }
+
+def build_oi_vol_delta(df, t1, t2):
+    d1 = df[df["timestamp_IST"] == t1]
+    d2 = df[df["timestamp_IST"] == t2]
+
+    if d1.empty or d2.empty:
+        return pd.DataFrame()
+
+    m = pd.merge(
+        d1, d2,
+        on="strike_price",
+        suffixes=("_1", "_2")
+    )
+
+    out = pd.DataFrame({
+        "STRIKE": m["strike_price"],
+        "Δ OI": (m["call_oi_2"].fillna(0) + m["put_oi_2"].fillna(0))
+               - (m["call_oi_1"].fillna(0) + m["put_oi_1"].fillna(0)),
+        "Δ VOL": (m["call_volume_2"].fillna(0) + m["put_volume_2"].fillna(0))
+                - (m["call_volume_1"].fillna(0) + m["put_volume_1"].fillna(0)),
+    })
+
+    return out.sort_values("STRIKE").reset_index(drop=True)
 
 
 def process_windows(df, gap):
@@ -402,6 +432,27 @@ def highlight_table(df, price):
                     )
 
     return df[cols].style.apply(lambda _: styles, axis=None)
+
+
+def style_strike_table(df, price):
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    strikes = df["STRIKE"].values
+
+    below = df[df["STRIKE"] <= price]
+    above = df[df["STRIKE"] >= price]
+
+    if not below.empty and not above.empty:
+        low_i = below.index[-1]
+        high_i = above.index[0]
+
+        styles.loc[low_i, "STRIKE"] += "font-weight:bold;color:blue;"
+        styles.loc[high_i, "STRIKE"] += "font-weight:bold;color:blue;"
+
+    nearest = df.iloc[(df["STRIKE"] - price).abs().argsort()[:1]].index
+    styles.loc[nearest, "STRIKE"] += "font-weight:bold;color:orange;"
+
+    return df.style.apply(lambda _: styles, axis=None)
 
 # =========================================================
 # RAW COLLECTOR
@@ -666,3 +717,50 @@ if (
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
+
+
+st.markdown("---")
+st.header("📊 OI & Volume Delta (Custom Time Comparison)")
+
+for sym in ["BTC", "ETH"]:
+    st.subheader(sym)
+
+    df_full = load_data(sym, expiry)
+    times = get_available_times(df_full)
+
+    if len(times) < 2:
+        st.info("Not enough data")
+        continue
+
+    # defaults
+    t1_default = times[-1]
+    t2_default = next(
+        (t for t in times if t >= t1_default + timedelta(minutes=10)),
+        times[-1]
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        t1 = st.selectbox(
+            f"{sym} Timestamp 1",
+            times,
+            index=times.index(t1_default),
+            key=f"{sym}_t1"
+        )
+    with c2:
+        t2 = st.selectbox(
+            f"{sym} Timestamp 2",
+            times,
+            index=times.index(t2_default),
+            key=f"{sym}_t2"
+        )
+
+    delta_df = build_oi_vol_delta(df_full, t1, t2)
+
+    price = btc_p if sym == "BTC" else eth_p
+
+    st.dataframe(
+        style_strike_table(delta_df, price),
+        use_container_width=True,
+        height=420
+    )
