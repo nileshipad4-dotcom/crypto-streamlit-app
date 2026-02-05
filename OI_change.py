@@ -179,14 +179,12 @@ def build_row(df, t1, t2, live=False):
 
 def process_windows(df, gap, symbol, expiry):
 
-    # 🔥 Inject live data FIRST
+    # 1️⃣ Inject live row FIRST (if available)
     df = inject_live_row(df, symbol, expiry)
 
     rows = []
     gap_td = timedelta(minutes=gap)
 
-
-    # Sort & unique times
     times = (
         df.sort_values("_row")
           .drop_duplicates("timestamp_IST")["timestamp_IST"]
@@ -196,7 +194,7 @@ def process_windows(df, gap, symbol, expiry):
     if len(times) < 2:
         return pd.DataFrame()
 
-    # -------- NORMAL WINDOWS (CSV → CSV) --------
+    # 2️⃣ Normal gap-aligned windows
     i = 0
     while i < len(times) - 1:
         t1 = times[i]
@@ -210,27 +208,15 @@ def process_windows(df, gap, symbol, expiry):
 
         i = times.index(t2)
 
-    # -------- LAST WINDOW LOGIC --------
-    last_csv = times[-1]
-    prev_csv = times[-2]
-    now_real = get_ist_now().replace(second=0, microsecond=0)
-    
-    # 🔥 normalize NOW onto CSV timeline
-    now = last_csv.replace(
-        hour=now_real.hour,
-        minute=now_real.minute
-    )
+    # 3️⃣ FORCE last window (this is what you lost)
+    t1 = times[-2]
+    t2 = times[-1]
 
+    live = (t2 == df["timestamp_IST"].max())
+    r = build_row(df, t1, t2, live=live)
+    if r:
+        rows.append(r)
 
-    # Case 1: CSV already has >= gap between last two points
-    if last_csv - prev_csv >= gap_td:
-        r = build_row(df, prev_csv, last_csv)
-        if r:
-            rows.append(r)
-
-
-    
-    
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("_end").drop(columns="_end")
