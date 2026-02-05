@@ -786,16 +786,14 @@ if (
     and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
-    expiries_to_collect = get_next_expiries(expiry, count=3)
-    
     for sym in ["BTC", "ETH"]:
-        for exp in expiries_to_collect:
-            df = fetch_live(sym, exp)
-            if not df.empty:
-                append_raw(
-                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
-                    df
-                )
+        df = fetch_live(sym, expiry)
+        if not df.empty:
+            append_raw(
+                f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",
+                df
+            )
+
 
 
     st.session_state.last_push_bucket = bucket
