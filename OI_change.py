@@ -814,6 +814,12 @@ with col_t:
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
+# ---------- SYNC LATEST CSV FROM GITHUB ----------
+for sym in ["BTC", "ETH"]:
+    path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
+    sync_from_github(path, path)
+
+
 latest_btc = get_latest_csv_time("BTC", expiry)
 latest_eth = get_latest_csv_time("ETH", expiry)
 
