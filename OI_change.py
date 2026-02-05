@@ -108,12 +108,23 @@ def get_next_expiries(selected_expiry, count=3):
     idx = expiries.index(selected_expiry)
     return expiries[idx : idx + count]
 
+
+def read_csv_from_github(path):
+    url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    if r.status_code != 200:
+        return pd.DataFrame()
+
+    content = base64.b64decode(r.json()["content"]).decode()
+    return pd.read_csv(StringIO(content))
+
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
 
 def load_data(symbol, expiry):
-    df = pd.read_csv(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
+    df = read_csv_from_github(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
     df["_row"] = range(len(df))
 
     raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
@@ -134,13 +145,38 @@ def load_data(symbol, expiry):
     return df
 
 def get_latest_csv_time(symbol, expiry):
-    """
-    Returns the true latest timestamp from CSV,
-    correctly handling midnight rollover.
-    """
-    path = f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
-    if not os.path.exists(path):
+    try:
+        df = read_csv_from_github(
+            f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
+        )
+        if df.empty or "timestamp_IST" not in df:
+            return "—"
+
+        raw = pd.to_datetime(
+            df["timestamp_IST"],
+            format="%H:%M",
+            errors="coerce"
+        ).dropna()
+
+        if raw.empty:
+            return "—"
+
+        base = datetime(2000, 1, 1)
+        out, last, day = [], None, 0
+
+        for t in raw:
+            if last is not None and t < last:
+                day += 1
+            out.append(
+                base + timedelta(days=day, hours=t.hour, minutes=t.minute)
+            )
+            last = t
+
+        return max(out).strftime("%H:%M")
+
+    except Exception:
         return "—"
+
 
     try:
         df = pd.read_csv(path, usecols=["timestamp_IST"])
