@@ -706,15 +706,9 @@ for sym in ["BTC", "ETH"]:
     # ---------- ADD LIVE ROW ----------
     if not df.empty:
         # 🔑 extract END time of last window shown
-        last_time_str = df.iloc[-1]["TIME"].split("-")[-1].strip()
-    
-        # convert "14:43" → timestamp
-        last_time = datetime.strptime(last_time_str, "%H:%M")
-        last_time = datetime(
-            2000, 1, 1,
-            last_time.hour,
-            last_time.minute
-        )
+
+        last_time = df_hist["timestamp_IST"].max()
+
     
         df_live = fetch_live(sym, expiry)
     
