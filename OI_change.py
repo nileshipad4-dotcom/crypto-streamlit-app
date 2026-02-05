@@ -189,7 +189,7 @@ def build_row(df, t1, t2, live=False):
 
 def process_windows(df, gap, symbol, expiry):
 
-    # 1️⃣ Inject live row FIRST (if available)
+    # 1️⃣ Inject live row FIRST
     df = inject_live_row(df, symbol, expiry)
 
     rows = []
@@ -204,11 +204,11 @@ def process_windows(df, gap, symbol, expiry):
     if len(times) < 2:
         return pd.DataFrame()
 
-    # 2️⃣ Normal gap-aligned windows
+    # 2️⃣ GAP WINDOWS — STOP AT SECOND-LAST
     i = 0
-    while i < len(times) - 1:
+    while i < len(times) - 2:
         t1 = times[i]
-        t2 = next((t for t in times[i+1:] if t >= t1 + gap_td), None)
+        t2 = next((t for t in times[i+1:-1] if t >= t1 + gap_td), None)
         if not t2:
             break
 
@@ -218,12 +218,12 @@ def process_windows(df, gap, symbol, expiry):
 
         i = times.index(t2)
 
-    # 3️⃣ FORCE last window (this is what you lost)
+    # 3️⃣ ALWAYS ADD LAST WINDOW (CSV → CSV OR CSV → LIVE)
     t1 = times[-2]
     t2 = times[-1]
 
-    live = (t2 == df["timestamp_IST"].max())
-    r = build_row(df, t1, t2, live=live)
+    is_live = t2 > t1
+    r = build_row(df, t1, t2, live=is_live)
     if r:
         rows.append(r)
 
@@ -232,7 +232,6 @@ def process_windows(df, gap, symbol, expiry):
         out = out.sort_values("_end").drop(columns="_end")
 
     return out
-
 
 # =========================================================
 # SIDE TABLE: LARGE OI EXTRACTOR
@@ -602,7 +601,7 @@ with col_t:
         "📤 Push raw snapshots",
         key="push_enabled"
     )
-toggle("📤 Push raw snapshots")
+
 
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
