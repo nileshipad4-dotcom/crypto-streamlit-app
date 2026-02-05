@@ -673,6 +673,13 @@ with c2:
         key="ts2_global"
     )
 
+# =========================================================
+# LIVE PRICES (ONCE)
+# =========================================================
+
+btc_p = get_delta_price("BTC")
+eth_p = get_delta_price("ETH")
+
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
     # Per-symbol default threshold
