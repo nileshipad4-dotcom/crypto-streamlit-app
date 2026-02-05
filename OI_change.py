@@ -585,11 +585,18 @@ with col_t:
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
+now_ist_str = get_ist_now().strftime("%H:%M")
+
 with col_c:
     if push_enabled:
-        st.markdown(f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`")
+        st.markdown(
+            f"**⏱ Next data in:** `{mm:02d}:{ss:02d}` &nbsp;&nbsp; "
+            f"**🕒 Now:** `{now_ist_str}`"
+        )
     else:
-        st.markdown("⏸ Snapshot push paused")
+        st.markdown(
+            f"⏸ Snapshot push paused &nbsp;&nbsp; **🕒 Now:** `{now_ist_str}`"
+        )
 
 # Push when countdown is between 02:00 and 03:00
 # i.e. remaining seconds: 120 < remaining < 180
