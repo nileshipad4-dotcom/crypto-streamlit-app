@@ -591,40 +591,10 @@ def append_raw(path, df):
     if sha: payload["sha"]=sha
     requests.put(url,headers=headers,json=payload)
 
+
 # =========================================================
-# UI
+# COMMON TIME SELECTION (GLOBAL)
 # =========================================================
-
-st.title("BTC & ETH OI Change Scanner")
-
-btc_p = get_delta_price("BTC")
-eth_p = get_delta_price("ETH")
-
-c1,c2 = st.columns(2)
-c1.metric("BTC Price", f"{btc_p:,.2f}" if btc_p else "—")
-c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
-
-c_exp, c_gap, c_thr = st.columns([2,1,1])
-
-with c_exp:
-    expiries = get_available_expiries()
-    expiry = st.selectbox(
-        "Select Expiry",
-        expiries,
-        index=len(expiries) - 1
-    )
-
-with c_gap:
-    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
-
-
-# ============================================
-# COMMON TIME SELECTION (GLOBAL)
-# ============================================
-
-# ============================================
-# COMMON TIME SELECTION (GLOBAL)
-# ============================================
 
 df_ref = load_data("BTC", expiry)
 
@@ -632,9 +602,7 @@ if df_ref.empty:
     st.warning("No data available for time selection")
     st.stop()
 
-df_ref["ts_hhmm"] = df_ref["timestamp_IST"].dt.strftime("%H:%M")
-
-# unique HH:MM in chronological order
+# extract HH:MM list in chronological order
 times = (
     df_ref.sort_values("timestamp_IST")["ts_hhmm"]
     .drop_duplicates()
@@ -642,7 +610,7 @@ times = (
 )
 
 if len(times) < 2:
-    st.warning("Not enough timestamps")
+    st.warning("Not enough timestamps to compare")
     st.stop()
 
 # -------------------------------
@@ -654,70 +622,30 @@ if len(times) < 2:
 ts1_default = times[-1]
 ts2_default = times[-2]
 
-# -------------------------------
-# UI
-# -------------------------------
-
 c1, c2 = st.columns(2)
 
 with c1:
     ts1_hhmm = st.selectbox(
         "Timestamp 1 (Latest)",
         times,
-        index=times.index(ts1_default)
+        index=len(times) - 1,
+        key="ts1_global"
     )
 
 with c2:
-    valid_ts2 = [t for t in times if t < ts1_hhmm]
+    ts1_dt = datetime.strptime(ts1_hhmm, "%H:%M")
+
+    valid_ts2 = [
+        t for t in times
+        if datetime.strptime(t, "%H:%M") < ts1_dt
+    ]
 
     ts2_hhmm = st.selectbox(
         "Timestamp 2 (Earlier)",
         valid_ts2,
-        index=len(valid_ts2) - 1
+        index=len(valid_ts2) - 1,
+        key="ts2_global"
     )
-
-
-def hhmm_to_dt(h):
-    return datetime.strptime(h, "%H:%M")
-
-ts1_default = times[-1]
-ts1_dt = hhmm_to_dt(ts1_default)
-
-# eligible earlier timestamps (≤10 min diff)
-eligible_ts2 = [
-    t for t in reversed(times[:-1])
-    if ts1_dt - hhmm_to_dt(t) <= timedelta(minutes=10)
-]
-
-ts2_default = eligible_ts2[0] if eligible_ts2 else times[-2]
-
-# -------------------------------
-# UI
-# -------------------------------
-
-c1, c2 = st.columns(2)
-
-with c1:
-    ts1_hhmm = st.selectbox(
-        "Timestamp 1 (Latest)",
-        times,
-        index=times.index(ts1_default)
-    )
-
-with c2:
-    valid_ts2 = [
-        t for t in times
-        if hhmm_to_dt(ts1_hhmm) - hhmm_to_dt(t) <= timedelta(minutes=10)
-        and hhmm_to_dt(t) < hhmm_to_dt(ts1_hhmm)
-    ]
-
-    ts2_hhmm = st.selectbox(
-        "Timestamp 2 (≤ 10 min earlier)",
-        valid_ts2,
-        index=0
-    )
-
-
 
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
