@@ -108,8 +108,8 @@ def load_data(symbol, expiry):
 
 def get_latest_csv_time(symbol, expiry):
     """
-    Scans CSV for latest timestamp_IST (HH:MM).
-    Returns string like '14:36' or '—' if not found.
+    Returns the true latest timestamp from CSV,
+    correctly handling midnight rollover.
     """
     path = f"{DATA_DIR}/{symbol}_{expiry}.csv"
     if not os.path.exists(path):
@@ -120,16 +120,26 @@ def get_latest_csv_time(symbol, expiry):
         if df.empty:
             return "—"
 
-        # Convert to datetime.time safely
-        times = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
-        times = times.dropna()
-
-        if times.empty:
+        raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
+        raw = raw.dropna()
+        if raw.empty:
             return "—"
 
-        return times.max().strftime("%H:%M")
+        base = datetime(2000, 1, 1)
+        out, last, day = [], None, 0
+
+        for t in raw:
+            if last is not None and t < last:
+                day += 1  # midnight rollover
+            out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
+            last = t
+
+        latest = max(out)
+        return latest.strftime("%H:%M")
+
     except Exception:
         return "—"
+
 
 
 # =========================================================
