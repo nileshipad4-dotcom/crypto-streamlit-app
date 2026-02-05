@@ -602,6 +602,74 @@ with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
 
+# ============================================
+# COMMON TIME SELECTION (GLOBAL)
+# ============================================
+
+df_ref = load_data("BTC", expiry)
+
+if df_ref.empty:
+    st.warning("No data available for time selection")
+    st.stop()
+
+df_ref["ts_hhmm"] = df_ref["timestamp_IST"].dt.strftime("%H:%M")
+
+# unique HH:MM in chronological order
+times = (
+    df_ref.sort_values("timestamp_IST")["ts_hhmm"]
+    .drop_duplicates()
+    .tolist()
+)
+
+if len(times) < 2:
+    st.warning("Not enough timestamps")
+    st.stop()
+
+# -------------------------------
+# DEFAULTS
+# TS1 = latest
+# TS2 = closest earlier within 10 min
+# -------------------------------
+
+def hhmm_to_dt(h):
+    return datetime.strptime(h, "%H:%M")
+
+ts1_default = times[-1]
+ts1_dt = hhmm_to_dt(ts1_default)
+
+# eligible earlier timestamps (≤10 min diff)
+eligible_ts2 = [
+    t for t in reversed(times[:-1])
+    if ts1_dt - hhmm_to_dt(t) <= timedelta(minutes=10)
+]
+
+ts2_default = eligible_ts2[0] if eligible_ts2 else times[-2]
+
+# -------------------------------
+# UI
+# -------------------------------
+
+c1, c2 = st.columns(2)
+
+with c1:
+    ts1_hhmm = st.selectbox(
+        "Timestamp 1 (Latest)",
+        times,
+        index=times.index(ts1_default)
+    )
+
+with c2:
+    valid_ts2 = [
+        t for t in times
+        if hhmm_to_dt(ts1_hhmm) - hhmm_to_dt(t) <= timedelta(minutes=10)
+        and hhmm_to_dt(t) < hhmm_to_dt(ts1_hhmm)
+    ]
+
+    ts2_hhmm = st.selectbox(
+        "Timestamp 2 (≤ 10 min earlier)",
+        valid_ts2,
+        index=0
+    )
 
 
 
@@ -728,87 +796,3 @@ if (
 
 
 
-st.markdown("---")
-st.header("📊 OI & Volume Delta (Common Time Comparison)")
-
-# -------------------------------------------------
-# Use BTC as the MASTER time reference
-# -------------------------------------------------
-df_ref = load_data("BTC", expiry)
-
-if df_ref.empty:
-    st.warning("No BTC data available for time selection")
-else:
-    df_ref["ts_hhmm"] = df_ref["timestamp_IST"].dt.strftime("%H:%M")
-
-    times = (
-        df_ref.sort_values("timestamp_IST")["ts_hhmm"]
-        .drop_duplicates()
-        .tolist()
-    )
-
-    if len(times) < 2:
-        st.warning("Not enough timestamps available")
-    else:
-        # Defaults
-        t1_default = times[-1]
-
-        def hhmm_to_dt(h):
-            return datetime.strptime(h, "%H:%M")
-
-        t1_dt = hhmm_to_dt(t1_default)
-
-        t2_default = next(
-            (t for t in times if hhmm_to_dt(t) >= t1_dt + timedelta(minutes=10)),
-            t1_default
-        )
-
-        c1, c2 = st.columns(2)
-        with c1:
-            t1_hhmm = st.selectbox(
-                "Timestamp 1 (HH:MM)",
-                times,
-                index=times.index(t1_default)
-            )
-
-        with c2:
-            valid_t2 = [
-                t for t in times
-                if hhmm_to_dt(t) >= hhmm_to_dt(t1_hhmm) + timedelta(minutes=10)
-            ] or [t1_hhmm]
-
-            t2_hhmm = st.selectbox(
-                "Timestamp 2 (≥10 min)",
-                valid_t2,
-                index=0
-            )
-
-        # -------------------------------------------------
-        # APPLY SAME TIMES TO BTC & ETH
-        # -------------------------------------------------
-        for sym in ["BTC", "ETH"]:
-            st.subheader(sym)
-
-            df_full = load_data(sym, expiry)
-            if df_full.empty:
-                st.info("No data available")
-                continue
-
-            df_full["ts_hhmm"] = df_full["timestamp_IST"].dt.strftime("%H:%M")
-
-            ts1 = resolve_ts(df_full, t1_hhmm)
-            ts2 = resolve_ts(df_full, t2_hhmm)
-
-            delta_df = build_oi_vol_delta(df_full, ts1, ts2)
-
-            if delta_df.empty:
-                st.info("No delta data for selected times")
-                continue
-
-            price = btc_p if sym == "BTC" else eth_p
-
-            st.dataframe(
-                style_strike_table(delta_df, price),
-                use_container_width=True,
-                height=420
-            )
