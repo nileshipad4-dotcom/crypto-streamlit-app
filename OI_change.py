@@ -71,23 +71,39 @@ def get_delta_price(symbol):
 
 def get_available_expiries():
     expiries = set()
-    for f in os.listdir(DATA_DIR):
-        if f.endswith(".csv"):
+
+    if not os.path.exists(RAW_DIR):
+        return []
+
+    for f in os.listdir(RAW_DIR):
+        if f.endswith("_snapshots.csv"):
             try:
-                expiry = f.split("_")[1].replace(".csv","")
+                expiry = f.split("_")[1]
                 datetime.strptime(expiry, "%d-%m-%Y")
                 expiries.add(expiry)
             except Exception:
                 pass
+
     return sorted(expiries, key=lambda x: datetime.strptime(x, "%d-%m-%Y"))
 
+
 def get_next_expiries(selected_expiry, count=3):
-    """
-    Returns selected expiry + next (count-1) expiries.
-    """
     expiries = get_available_expiries()
-    if selected_expiry not in expiries:
-        return [selected_expiry]
+
+    # Always include selected expiry
+    result = [selected_expiry]
+
+    # Add future expiries even if CSV doesn't exist yet
+    try:
+        base = datetime.strptime(selected_expiry, "%d-%m-%Y")
+        while len(result) < count:
+            base += timedelta(days=7)  # weekly expiry
+            result.append(base.strftime("%d-%m-%Y"))
+    except Exception:
+        pass
+
+    return result
+
 
     idx = expiries.index(selected_expiry)
     return expiries[idx : idx + count]
