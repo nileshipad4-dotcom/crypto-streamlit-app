@@ -151,8 +151,9 @@ def build_row(df, t1, t2, live=False):
     if len(ce)<2 or len(pe)<2:
         return None
 
-    sum_ce = int(m["CE"].sum()/100)
-    sum_pe = int(m["PE"].sum()/100)
+    sum_ce = int(agg["CE"].sum() / 100)
+    sum_pe = int(agg["PE"].sum() / 100)
+
 
     return {
         "TIME": f"{t1:%H:%M} - {t2:%H:%M}" + (" ⏳" if live else ""),
