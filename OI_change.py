@@ -259,15 +259,38 @@ def build_oi_vol_delta(df, t1, t2):
     )
 
     out = pd.DataFrame({
-        "STRIKE": m["strike_price"],
-        "Δ OI": (m["call_oi_2"].fillna(0) + m["put_oi_2"].fillna(0))
-               - (m["call_oi_1"].fillna(0) + m["put_oi_1"].fillna(0)),
-        "Δ VOL": (m["call_volume_2"].fillna(0) + m["put_volume_2"].fillna(0))
-                - (m["call_volume_1"].fillna(0) + m["put_volume_1"].fillna(0)),
+        "STRIKE": m["strike_price"].astype(int),
+
+        # ---- OI ----
+        "Δ CALL OI": (
+            m["call_oi_2"].fillna(0) - m["call_oi_1"].fillna(0)
+        ).astype(int),
+
+        "Δ PUT OI": (
+            m["put_oi_2"].fillna(0) - m["put_oi_1"].fillna(0)
+        ).astype(int),
+
+        "Δ TOTAL OI": (
+            (m["call_oi_2"].fillna(0) + m["put_oi_2"].fillna(0))
+            - (m["call_oi_1"].fillna(0) + m["put_oi_1"].fillna(0))
+        ).astype(int),
+
+        # ---- VOLUME ----
+        "Δ CALL VOL": (
+            m["call_volume_2"].fillna(0) - m["call_volume_1"].fillna(0)
+        ).astype(int),
+
+        "Δ PUT VOL": (
+            m["put_volume_2"].fillna(0) - m["put_volume_1"].fillna(0)
+        ).astype(int),
+
+        "Δ TOTAL VOL": (
+            (m["call_volume_2"].fillna(0) + m["put_volume_2"].fillna(0))
+            - (m["call_volume_1"].fillna(0) + m["put_volume_1"].fillna(0))
+        ).astype(int),
     })
 
     return out.sort_values("STRIKE").reset_index(drop=True)
-
 
 def process_windows(df, gap):
     rows=[]
