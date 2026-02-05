@@ -86,7 +86,7 @@ def get_available_expiries():
 # =========================================================
 
 def load_data(symbol, expiry):
-    df = pd.read_csv(f"{DATA_DIR}/{symbol}_{expiry}.csv")
+    df = pd.read_csv(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
     df["_row"] = range(len(df))
 
     raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
@@ -111,7 +111,7 @@ def get_latest_csv_time(symbol, expiry):
     Returns the true latest timestamp from CSV,
     correctly handling midnight rollover.
     """
-    path = f"{DATA_DIR}/{symbol}_{expiry}.csv"
+    path = f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
     if not os.path.exists(path):
         return "—"
 
