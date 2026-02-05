@@ -127,34 +127,11 @@ def load_data(symbol, expiry):
         last = t
 
     df["timestamp_IST"] = out
-    df["ts_hhmm"] = df["timestamp_IST"].dt.strftime("%H:%M")
-
+    
     # 🔑 CRITICAL FIX: remove duplicate strike rows per timestamp
     df = df.drop_duplicates(subset=["timestamp_IST", "strike_price"])
     
     return df
-
-def resolve_ts(df, hhmm):
-    """
-    Resolve HH:MM to the nearest earlier real timestamp.
-    Safe for missing minutes (ETH gaps).
-    """
-    subset = df[df["ts_hhmm"] == hhmm]
-
-    if not subset.empty:
-        return subset["timestamp_IST"].iloc[-1]
-
-    # 🔑 FALLBACK: take the latest timestamp BEFORE hhmm
-    target = datetime.strptime(hhmm, "%H:%M").time()
-
-    earlier = df[df["timestamp_IST"].dt.time <= target]
-
-    if earlier.empty:
-        return None
-
-    return earlier.sort_values("timestamp_IST")["timestamp_IST"].iloc[-1]
-
-
 
 def get_latest_csv_time(symbol, expiry):
     """
@@ -191,21 +168,6 @@ def get_latest_csv_time(symbol, expiry):
         return "—"
 
 
-def get_available_times(df):
-    times = (
-        df.sort_values("_row")["timestamp_IST"]
-        .drop_duplicates()
-        .tolist()
-    )
-    return times
-
-def get_common_times(df):
-    return (
-        df.sort_values("_row")["timestamp_IST"]
-        .drop_duplicates()
-        .dt.strftime("%H:%M")
-        .tolist()
-    )
 
 # =========================================================
 # WINDOW ENGINE
@@ -276,50 +238,6 @@ def build_row(df, t1, t2, live=False):
         "_end": t2
     }
 
-def build_oi_vol_delta(df, t1, t2):
-    d1 = df[df["timestamp_IST"] == t1]
-    d2 = df[df["timestamp_IST"] == t2]
-
-    if d1.empty or d2.empty:
-        return pd.DataFrame()
-
-    m = pd.merge(
-        d1, d2,
-        on="strike_price",
-        suffixes=("_1", "_2")
-    )
-
-    out = pd.DataFrame({
-        "Δ CALL VOL": (
-            m["call_volume_2"].fillna(0) - m["call_volume_1"].fillna(0)
-        ).astype(int),
-
-        "Δ CALL OI": (
-            m["call_oi_2"].fillna(0) - m["call_oi_1"].fillna(0)
-        ).astype(int),
-
-        "STRIKE": m["strike_price"].astype(int),
-
-        "Δ PUT OI": (
-            m["put_oi_2"].fillna(0) - m["put_oi_1"].fillna(0)
-        ).astype(int),
-
-        "Δ PUT VOL": (
-            m["put_volume_2"].fillna(0) - m["put_volume_1"].fillna(0)
-        ).astype(int),
-    })
-
-    return out.sort_values("STRIKE").reset_index(drop=True)
-
-# =========================================================
-# WINDOW GAP SELECTION (UI)
-# =========================================================
-
-gap = st.selectbox(
-    "Min Gap (minutes)",
-    [5, 10, 15, 20, 30, 45, 60],
-    index=2  # default = 15 min
-)
 
 def process_windows(df, gap):
     rows=[]
@@ -485,27 +403,6 @@ def highlight_table(df, price):
 
     return df[cols].style.apply(lambda _: styles, axis=None)
 
-
-def style_strike_table(df, price):
-    styles = pd.DataFrame("", index=df.index, columns=df.columns)
-
-    strikes = df["STRIKE"].values
-
-    below = df[df["STRIKE"] <= price]
-    above = df[df["STRIKE"] >= price]
-
-    if not below.empty and not above.empty:
-        low_i = below.index[-1]
-        high_i = above.index[0]
-
-        styles.loc[low_i, "STRIKE"] += "font-weight:bold;color:blue;"
-        styles.loc[high_i, "STRIKE"] += "font-weight:bold;color:blue;"
-
-    nearest = df.iloc[(df["STRIKE"] - price).abs().argsort()[:1]].index
-    styles.loc[nearest, "STRIKE"] += "font-weight:bold;color:orange;"
-
-    return df.style.apply(lambda _: styles, axis=None)
-
 # =========================================================
 # RAW COLLECTOR
 # =========================================================
@@ -601,84 +498,35 @@ def append_raw(path, df):
     if sha: payload["sha"]=sha
     requests.put(url,headers=headers,json=payload)
 
-
 # =========================================================
-# COMMON TIME SELECTION (GLOBAL)
-# =========================================================
-# =========================================================
-# EXPIRY SELECTION (UI)
+# UI
 # =========================================================
 
-expiries = get_available_expiries()
-
-if not expiries:
-    st.warning("No expiry data available")
-    st.stop()
-
-expiry = st.selectbox(
-    "Select Expiry",
-    expiries,
-    index=len(expiries) - 1
-)
-
-
-df_ref = load_data("BTC", expiry)
-
-if df_ref.empty:
-    st.warning("No data available for time selection")
-    st.stop()
-
-# extract HH:MM list in chronological order
-times = (
-    df_ref.sort_values("timestamp_IST")["ts_hhmm"]
-    .drop_duplicates()
-    .tolist()
-)
-
-if len(times) < 2:
-    st.warning("Not enough timestamps to compare")
-    st.stop()
-
-# -------------------------------
-# DEFAULTS
-# TS1 = latest
-# TS2 = immediately previous
-# -------------------------------
-
-ts1_default = times[-1]
-ts2_default = times[-2]
-
-c1, c2 = st.columns(2)
-
-with c1:
-    ts1_hhmm = st.selectbox(
-        "Timestamp 1 (Latest)",
-        times,
-        index=len(times) - 1,
-        key="ts1_global"
-    )
-
-with c2:
-    ts1_dt = datetime.strptime(ts1_hhmm, "%H:%M")
-
-    valid_ts2 = [
-        t for t in times
-        if datetime.strptime(t, "%H:%M") < ts1_dt
-    ]
-
-    ts2_hhmm = st.selectbox(
-        "Timestamp 2 (Earlier)",
-        valid_ts2,
-        index=len(valid_ts2) - 1,
-        key="ts2_global"
-    )
-
-# =========================================================
-# LIVE PRICES (ONCE)
-# =========================================================
+st.title("BTC & ETH OI Change Scanner")
 
 btc_p = get_delta_price("BTC")
 eth_p = get_delta_price("ETH")
+
+c1,c2 = st.columns(2)
+c1.metric("BTC Price", f"{btc_p:,.2f}" if btc_p else "—")
+c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
+
+c_exp, c_gap, c_thr = st.columns([2,1,1])
+
+with c_exp:
+    expiries = get_available_expiries()
+    expiry = st.selectbox(
+        "Select Expiry",
+        expiries,
+        index=len(expiries) - 1
+    )
+
+with c_gap:
+    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
+
+
+
+
 
 for sym in ["BTC", "ETH"]:
     st.subheader(sym)
@@ -750,6 +598,24 @@ for sym in ["BTC", "ETH"]:
 
 
 
+    if not df.empty:
+        times=df["TIME"].tolist()
+        f,t = st.columns(2)
+        with f:
+            t1=st.selectbox(f"From ({sym})",times,index=0,key=f"{sym}f")
+        with t:
+            t2=st.selectbox(f"To ({sym})",times,index=len(times)-1,key=f"{sym}t")
+
+        i1,i2=times.index(t1),times.index(t2)
+        s=df.iloc[min(i1,i2):max(i1,i2)+1]
+
+        ce,pe,d = int(s["Σ ΔCE OI"].sum()), int(s["Σ ΔPE OI"].sum()), int(s["Δ (PE − CE)"].sum())
+        def c(v): return "red" if v>0 else "green" if v<0 else "black"
+
+        a,b,c3 = st.columns(3)
+        a.markdown(f"**△ CE:** <span style='color:{c(ce)}'>{ce}</span>",unsafe_allow_html=True)
+        b.markdown(f"**△ PE:** <span style='color:{c(pe)}'>{pe}</span>",unsafe_allow_html=True)
+        c3.markdown(f"**△ (PE − CE):** <span style='color:{c(d)}'>{d}</span>",unsafe_allow_html=True)
 
 # =========================================================
 # RAW PUSH
@@ -786,56 +652,17 @@ if (
     and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
+    expiries_to_collect = get_next_expiries(expiry, count=3)
+    
     for sym in ["BTC", "ETH"]:
-        df = fetch_live(sym, expiry)
-        if not df.empty:
-            append_raw(
-                f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv",
-                df
-            )
-
+        for exp in expiries_to_collect:
+            df = fetch_live(sym, exp)
+            if not df.empty:
+                append_raw(
+                    f"{RAW_DIR}/{sym}_{exp}_snapshots.csv",
+                    df
+                )
 
 
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
-
-# =========================================================
-# OI & VOLUME DELTA (USING COMMON TS1 / TS2)
-# =========================================================
-
-st.markdown("---")
-st.header("📊 OI & Volume Delta (TS1 − TS2)")
-
-for sym in ["BTC", "ETH"]:
-    st.subheader(sym)
-
-    df_full = load_data(sym, expiry)
-    if df_full.empty:
-        st.info("No data available")
-        continue
-
-    # resolve real timestamps from HH:MM
-    ts1 = resolve_ts(df_full, ts1_hhmm)
-    ts2 = resolve_ts(df_full, ts2_hhmm)
-    
-    if ts1 is None or ts2 is None:
-        st.info("No matching timestamps for this symbol")
-        continue
-
-
-    delta_df = build_oi_vol_delta(df_full, ts2, ts1)
-
-    if delta_df.empty:
-        st.info("No delta data for selected timestamps")
-        continue
-
-    price = btc_p if sym == "BTC" else eth_p
-
-    st.dataframe(
-        style_strike_table(delta_df, price),
-        use_container_width=True,
-        height=420
-    )
-
-
-
