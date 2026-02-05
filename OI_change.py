@@ -24,6 +24,10 @@ os.makedirs(RAW_DIR, exist_ok=True)
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 st_autorefresh(interval=60_000, key="refresh")
 
+if "push_enabled" not in st.session_state:
+    st.session_state.push_enabled = True
+
+
 DELTA_API = "https://api.india.delta.exchange/v2/tickers"
 
 GITHUB_TOKEN  = st.secrets["GITHUB_TOKEN"]
@@ -594,7 +598,11 @@ bucket = ((datetime.utcnow().hour*60)+datetime.utcnow().minute)//4
 col_t, col_c = st.columns([1,2])
 
 with col_t:
-    push_enabled = st.toggle("📤 Push raw snapshots")
+    st.toggle(
+        "📤 Push raw snapshots",
+        key="push_enabled"
+    )
+toggle("📤 Push raw snapshots")
 
 bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
