@@ -252,22 +252,21 @@ def build_row(df, t1, t2, live=False):
 
 
 def process_windows(df, gap):
-    rows=[]
-    windows = build_all_windows(df,gap)
+    rows = []
+    windows = build_all_windows(df, gap)
 
-    for t1,t2 in windows:
-        r = build_row(df,t1,t2)
-        if r: rows.append(r)
+    for t1, t2 in windows:
+        r = build_row(df, t1, t2)
+        if r:
+            rows.append(r)
 
-    if windows:
-        r = build_row(df, windows[-1][1], df["timestamp_IST"].max(), live=True)
-        if r: rows.append(r)
+    # ❌ NO LIVE / RUNNING WINDOW
+    # ❌ NO partial delta calculation
 
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("_end").drop(columns="_end")
     return out
-
 
 # =========================================================
 # SIDE TABLE: LARGE OI EXTRACTOR
