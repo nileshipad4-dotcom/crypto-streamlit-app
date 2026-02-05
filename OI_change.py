@@ -24,8 +24,8 @@ os.makedirs(RAW_DIR, exist_ok=True)
 st.set_page_config(layout="wide", page_title="OI Time Scanner")
 st_autorefresh(interval=60_000, key="refresh")
 
-if "push_enabled" not in st.session_state:
-    st.session_state.push_enabled = True
+if "st.session_state.push_enabled" not in st.session_state:
+    st.session_state.st.session_state.push_enabled = True
 
 
 DELTA_API = "https://api.india.delta.exchange/v2/tickers"
@@ -546,7 +546,7 @@ col_t, col_c = st.columns([1,2])
 with col_t:
     st.toggle(
         "📤 Push raw snapshots",
-        key="push_enabled"
+        key="st.session_state.push_enabled"
     )
 
 
@@ -554,7 +554,7 @@ bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
 with col_c:
-    if push_enabled:
+    if st.session_state.push_enabled:
         st.markdown(f"**⏱ Next data in:** `{mm:02d}:{ss:02d}`")
     else:
         st.markdown("⏸ Snapshot push paused")
@@ -563,7 +563,7 @@ with col_c:
 # i.e. remaining seconds: 120 < remaining < 180
 
 if (
-    push_enabled
+    st.session_state.push_enabled
     and 120 < remaining < 180
     and st.session_state.last_push_bucket != bucket
 ):
