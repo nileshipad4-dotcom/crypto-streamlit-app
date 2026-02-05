@@ -159,20 +159,60 @@ def build_row(df, t1, t2, live=False):
 
 
 def process_windows(df, gap):
-    rows=[]
-    windows = build_all_windows(df,gap)
+    rows = []
+    gap_td = timedelta(minutes=gap)
 
-    for t1,t2 in windows:
-        r = build_row(df,t1,t2)
-        if r: rows.append(r)
+    # Sort & unique times
+    times = (
+        df.sort_values("_row")
+          .drop_duplicates("timestamp_IST")["timestamp_IST"]
+          .tolist()
+    )
 
-    if windows:
-        r = build_row(df, windows[-1][1], df["timestamp_IST"].max(), live=True)
-        if r: rows.append(r)
+    if len(times) < 2:
+        return pd.DataFrame()
+
+    # -------- NORMAL WINDOWS (CSV → CSV) --------
+    i = 0
+    while i < len(times) - 1:
+        t1 = times[i]
+        t2 = next((t for t in times[i+1:] if t >= t1 + gap_td), None)
+        if not t2:
+            break
+
+        r = build_row(df, t1, t2)
+        if r:
+            rows.append(r)
+
+        i = times.index(t2)
+
+    # -------- LAST WINDOW LOGIC --------
+    last_csv = times[-1]
+    prev_csv = times[-2]
+    now = get_ist_now().replace(second=0, microsecond=0)
+
+    # Case 1: CSV already has >= gap between last two points
+    if last_csv - prev_csv >= gap_td:
+        r = build_row(df, prev_csv, last_csv)
+        if r:
+            rows.append(r)
+
+    # Case 2: CSV gap < gap → compare with real time
+    elif now - last_csv >= gap_td:
+        # inject synthetic "now" row
+        live_df = df.copy()
+        latest = live_df[live_df["timestamp_IST"] == last_csv].copy()
+        latest["timestamp_IST"] = now
+        live_df = pd.concat([live_df, latest], ignore_index=True)
+
+        r = build_row(live_df, last_csv, now, live=True)
+        if r:
+            rows.append(r)
 
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("_end").drop(columns="_end")
+
     return out
 
 
