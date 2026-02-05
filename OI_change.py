@@ -139,8 +139,15 @@ def build_row(df, t1, t2, live=False):
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
 
-    ce = m.sort_values("CE",ascending=False)
-    pe = m.sort_values("PE",ascending=False)
+    # ---- AGGREGATE BY STRIKE TO AVOID DUPLICATES ----
+    agg = (
+        m.groupby("strike_price", as_index=False)
+         .agg({"CE": "sum", "PE": "sum"})
+    )
+    
+    ce = agg.sort_values("CE", ascending=False)
+    pe = agg.sort_values("PE", ascending=False)
+
     if len(ce)<2 or len(pe)<2:
         return None
 
