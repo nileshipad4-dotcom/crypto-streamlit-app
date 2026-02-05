@@ -291,6 +291,9 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
     if len(strikes) <= 4:
         return None
     m = m[m["strike_price"].isin(strikes[2:-2])]
+    # 🔑 FIX: force numeric OI columns
+    for c in ["call_oi_1", "call_oi_2", "put_oi_1", "put_oi_2"]:
+        m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
 
     # delta from last snapshot → live
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
