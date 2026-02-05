@@ -794,5 +794,38 @@ if (
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
 
+# =========================================================
+# OI & VOLUME DELTA (USING COMMON TS1 / TS2)
+# =========================================================
+
+st.markdown("---")
+st.header("📊 OI & Volume Delta (TS1 − TS2)")
+
+for sym in ["BTC", "ETH"]:
+    st.subheader(sym)
+
+    df_full = load_data(sym, expiry)
+    if df_full.empty:
+        st.info("No data available")
+        continue
+
+    # resolve real timestamps from HH:MM
+    ts1 = resolve_ts(df_full, ts1_hhmm)  # latest
+    ts2 = resolve_ts(df_full, ts2_hhmm)  # earlier (≤10 min)
+
+    delta_df = build_oi_vol_delta(df_full, ts1, ts2)
+
+    if delta_df.empty:
+        st.info("No delta data for selected timestamps")
+        continue
+
+    price = btc_p if sym == "BTC" else eth_p
+
+    st.dataframe(
+        style_strike_table(delta_df, price),
+        use_container_width=True,
+        height=420
+    )
+
 
 
