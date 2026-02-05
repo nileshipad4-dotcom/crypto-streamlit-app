@@ -127,11 +127,18 @@ def load_data(symbol, expiry):
         last = t
 
     df["timestamp_IST"] = out
-    
+    df["ts_hhmm"] = df["timestamp_IST"].dt.strftime("%H:%M")
+
     # 🔑 CRITICAL FIX: remove duplicate strike rows per timestamp
     df = df.drop_duplicates(subset=["timestamp_IST", "strike_price"])
     
     return df
+
+def resolve_ts(df, hhmm):
+    """
+    Maps HH:MM back to the real datetime timestamp (midnight-safe)
+    """
+    return df[df["ts_hhmm"] == hhmm]["timestamp_IST"].iloc[-1]
 
 def get_latest_csv_time(symbol, expiry):
     """
@@ -175,6 +182,14 @@ def get_available_times(df):
         .tolist()
     )
     return times
+
+def get_common_times(df):
+    return (
+        df.sort_values("_row")["timestamp_IST"]
+        .drop_duplicates()
+        .dt.strftime("%H:%M")
+        .tolist()
+    )
 
 # =========================================================
 # WINDOW ENGINE
@@ -729,6 +744,38 @@ if (
     st.session_state.last_push_bucket = bucket
     st.success("Raw snapshots pushed successfully.")
 
+st.markdown("---")
+st.header("⏱ Common Time Comparison (OI & Volume)")
+
+# use BTC as reference for available times
+df_ref = load_data("BTC", expiry)
+times = get_common_times(df_ref)
+
+if len(times) < 2:
+    st.warning("Not enough timestamps available")
+else:
+    t1_default = times[-1]
+
+    t2_default = next(
+        (t for t in times if t >= t1_default),
+        times[-1]
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        t1_hhmm = st.selectbox(
+            "Timestamp 1 (HH:MM)",
+            times,
+            index=times.index(t1_default)
+        )
+
+    with c2:
+        t2_hhmm = st.selectbox(
+            "Timestamp 2 (HH:MM)",
+            times,
+            index=max(0, times.index(t1_default) - 1)
+        )
+
 
 st.markdown("---")
 st.header("📊 OI & Volume Delta (Custom Time Comparison)")
@@ -737,36 +784,83 @@ for sym in ["BTC", "ETH"]:
     st.subheader(sym)
 
     df_full = load_data(sym, expiry)
-    times = get_available_times(df_full)
 
-    if len(times) < 2:
-        st.info("Not enough data")
+    if df_full.empty:
+        st.info("No data available")
         continue
 
-    # defaults
+    # ----------------------------------
+    # Build HH:MM column (COMMON TIME)
+    # ----------------------------------
+    df_full["ts_hhmm"] = df_full["timestamp_IST"].dt.strftime("%H:%M")
+
+    times = (
+        df_full.sort_values("timestamp_IST")["ts_hhmm"]
+        .drop_duplicates()
+        .tolist()
+    )
+
+    if len(times) < 2:
+        st.info("Not enough timestamps")
+        continue
+
+    # ----------------------------------
+    # DEFAULTS
+    # t1 = latest
+    # t2 = >= t1 + 10 min
+    # ----------------------------------
     t1_default = times[-1]
+
+    def hhmm_to_dt(h):
+        return datetime.strptime(h, "%H:%M")
+
+    t1_dt = hhmm_to_dt(t1_default)
+
     t2_default = next(
-        (t for t in times if t >= t1_default + timedelta(minutes=10)),
-        times[-1]
+        (
+            t for t in times
+            if hhmm_to_dt(t) >= t1_dt + timedelta(minutes=10)
+        ),
+        t1_default
     )
 
     c1, c2 = st.columns(2)
+
     with c1:
-        t1 = st.selectbox(
-            f"{sym} Timestamp 1",
+        t1_hhmm = st.selectbox(
+            f"{sym} Timestamp 1 (HH:MM)",
             times,
             index=times.index(t1_default),
             key=f"{sym}_t1"
         )
+
     with c2:
-        t2 = st.selectbox(
-            f"{sym} Timestamp 2",
-            times,
-            index=times.index(t2_default),
+        valid_t2 = [
+            t for t in times
+            if hhmm_to_dt(t) >= hhmm_to_dt(t1_hhmm) + timedelta(minutes=10)
+        ] or [t1_hhmm]
+
+        t2_hhmm = st.selectbox(
+            f"{sym} Timestamp 2 (≥10 min)",
+            valid_t2,
+            index=0,
             key=f"{sym}_t2"
         )
 
-    delta_df = build_oi_vol_delta(df_full, t1, t2)
+    # ----------------------------------
+    # RESOLVE REAL TIMESTAMPS
+    # ----------------------------------
+    ts1 = resolve_ts(df_full, t1_hhmm)
+    ts2 = resolve_ts(df_full, t2_hhmm)
+
+    # ----------------------------------
+    # BUILD DELTA TABLE
+    # ----------------------------------
+    delta_df = build_oi_vol_delta(df_full, ts1, ts2)
+
+    if delta_df.empty:
+        st.info("No delta data for selected times")
+        continue
 
     price = btc_p if sym == "BTC" else eth_p
 
