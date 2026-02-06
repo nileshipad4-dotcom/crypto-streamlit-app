@@ -412,6 +412,56 @@ def process_windows(df, gap):
         out = out.sort_values("_end").drop(columns="_end")
     return out
 
+
+
+def build_csv_vs_live_row(df_hist, df_live, ts):
+    d1 = df_hist[df_hist["timestamp_IST"] == ts]
+    if d1.empty or df_live.empty:
+        return None
+
+    d1 = d1.copy()
+    d2 = df_live.copy()
+
+    d1["strike_price"] = d1["strike_price"].astype(int)
+    d2["strike_price"] = d2["strike_price"].astype(int)
+
+    m = pd.merge(d1, d2, on="strike_price", suffixes=("_1", "_2"))
+    if m.empty:
+        return None
+
+    strikes = sorted(m["strike_price"].unique())
+    if len(strikes) <= 4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
+
+    m["CE"] = m["call_oi_2"] - m["call_oi_1"]
+    m["PE"] = m["put_oi_2"] - m["put_oi_1"]
+
+    agg = (
+        m.groupby("strike_price", as_index=False)
+         .agg({"CE": "sum", "PE": "sum"})
+    )
+
+    ce = agg.sort_values("CE", ascending=False)
+    pe = agg.sort_values("PE", ascending=False)
+
+    if len(ce) < 2 or len(pe) < 2:
+        return None
+
+    sum_ce = int(agg["CE"].sum() / 100)
+    sum_pe = int(agg["PE"].sum() / 100)
+
+    return {
+        "TIME": f"{ts:%H:%M} → LIVE",
+        "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
+        "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
+        "Σ ΔCE OI": sum_ce,
+        "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
+        "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
+        "Σ ΔPE OI": sum_pe,
+        "Δ (PE − CE)": sum_pe - sum_ce,
+    }
+
 # =========================================================
 # SIDE TABLE: LARGE OI EXTRACTOR
 # =========================================================
@@ -795,6 +845,49 @@ for sym in ["BTC", "ETH"]:
         a.markdown(f"**△ CE:** <span style='color:{c(ce)}'>{ce}</span>",unsafe_allow_html=True)
         b.markdown(f"**△ PE:** <span style='color:{c(pe)}'>{pe}</span>",unsafe_allow_html=True)
         c3.markdown(f"**△ (PE − CE):** <span style='color:{c(d)}'>{d}</span>",unsafe_allow_html=True)
+
+st.markdown("---")
+st.header("📊 CSV vs LIVE (Delta API)")
+
+df_hist_btc = load_data("BTC", expiry)
+
+csv_times = (
+    df_hist_btc["timestamp_IST"]
+    .drop_duplicates()
+    .sort_values(ascending=False)
+    .tolist()
+)
+
+selected_ts = st.selectbox(
+    "Select CSV Time",
+    csv_times,
+    format_func=lambda x: x.strftime("%H:%M")
+)
+
+rows = []
+
+for sym in ["BTC", "ETH"]:
+    df_hist = load_data(sym, expiry)
+
+    # LIVE DATA FROM DELTA API
+    df_live = fetch_live(sym, expiry)
+
+    r = build_csv_vs_live_row(df_hist, df_live, selected_ts)
+    if r:
+        r["SYMBOL"] = sym
+        rows.append(r)
+
+if rows:
+    out = pd.DataFrame(rows).set_index("SYMBOL")
+
+    st.dataframe(
+        out,
+        use_container_width=True,
+        height=140
+    )
+else:
+    st.info("No LIVE data available from Delta API")
+
 
 # =========================================================
 # RAW PUSH
