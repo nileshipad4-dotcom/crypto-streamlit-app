@@ -472,11 +472,29 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
 
 
 def build_all_windows(df, gap):
+    if df.empty or "timestamp_IST" not in df.columns:
+        return []
+
     times = (
-        df.sort_values("_row")
+        df.sort_values("timestamp_IST")
           .drop_duplicates("timestamp_IST")["timestamp_IST"]
           .tolist()
     )
+
+    windows, i = [], 0
+    while i < len(times) - 1:
+        t1 = times[i]
+        t2 = next(
+            (t for t in times[i + 1:] if t >= t1 + timedelta(minutes=gap)),
+            None
+        )
+        if not t2:
+            break
+        windows.append((t1, t2))
+        i = times.index(t2)
+
+    return windows
+
 
     windows, i = [], 0
     while i < len(times)-1:
