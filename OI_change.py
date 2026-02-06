@@ -53,6 +53,9 @@ CANONICAL_COLS = [
 if "last_push_bucket" not in st.session_state:
     st.session_state.last_push_bucket = None
 
+if "default_csv_ts" not in st.session_state:
+    st.session_state.default_csv_ts = None
+
 # =========================================================
 # PRICE
 # =========================================================
@@ -984,8 +987,20 @@ for sym in ["BTC", "ETH"]:
 
 
 
+
     if not df.empty:
-        times=df["TIME"].tolist()
+        times = df["TIME"].tolist()
+    
+        # 🔑 CAPTURE DEFAULT CSV TIME FROM LAST MAIN ROW
+        last_time_label = times[-1]
+        try:
+            if "-" in last_time_label:
+                st.session_state.default_csv_ts = last_time_label.split("-")[-1].strip()
+            elif "→" in last_time_label:
+                st.session_state.default_csv_ts = last_time_label.split("→")[0].strip()
+        except Exception:
+            pass
+
         f,t = st.columns(2)
         with f:
             t1=st.selectbox(f"From ({sym})",times,index=0,key=f"{sym}f")
@@ -1088,11 +1103,21 @@ csv_times = (
     .tolist()
 )
 
+# 🔑 DEFAULT INDEX FROM MAIN TABLE WINDOW
+default_idx = 0
+if st.session_state.default_csv_ts:
+    for i, t in enumerate(csv_times):
+        if t.strftime("%H:%M") == st.session_state.default_csv_ts:
+            default_idx = i
+            break
+
 selected_ts = st.selectbox(
     "Select CSV Time",
     csv_times,
+    index=default_idx,
     format_func=lambda x: x.strftime("%H:%M")
 )
+
 
 rows = []
 
