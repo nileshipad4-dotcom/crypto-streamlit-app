@@ -337,20 +337,20 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
 
     sum_ce = int(agg["CE"].sum() / 100)
     sum_pe = int(agg["PE"].sum() / 100)
-
+    
     return {
         "TIME": f"{last_time:%H:%M} → LIVE",
-        "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
-        "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
+        "MAX CE 1": f"{int(ce1.strike_price)}:- {int(ce1.CE)}",
+        "MAX CE 2": f"{int(ce2.strike_price)}:- {int(ce2.CE)}",
         "Σ ΔCE OI": sum_ce,
-        "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
-        "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
+        "MAX PE 1": f"{int(pe1.strike_price)}:- {int(pe1.PE)}",
+        "MAX PE 2": f"{int(pe2.strike_price)}:- {int(pe2.PE)}",
         "Σ ΔPE OI": sum_pe,
         "Δ (PE − CE)": sum_pe - sum_ce,
-        "_ce1": ce.iloc[0].CE,
-        "_ce2": ce.iloc[1].CE,
-        "_pe1": pe.iloc[0].PE,
-        "_pe2": pe.iloc[1].PE,
+        "_ce1": ce1.CE,
+        "_ce2": ce2.CE,
+        "_pe1": pe1.PE,
+        "_pe2": pe2.PE,
     }
 
 
