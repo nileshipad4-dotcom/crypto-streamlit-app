@@ -499,7 +499,7 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
     ce = agg.sort_values("CE", ascending=False)
     pe = agg.sort_values("PE", ascending=False)
 
-    if len(ce) < 2 or len(pe) < 2:
+    if len(ce) < 1 or len(pe) < 1:
         return None
 
     sum_ce = int(agg["CE"].sum() / 100)
@@ -795,23 +795,7 @@ c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
     expiry = get_upcoming_expiry()
-    # ---------- SYNC CSVs BEFORE ANY READ ----------
-    if "last_sync" not in st.session_state:
-        st.session_state.last_sync = None
-    
-    now = datetime.utcnow()
-    
-    if (
-        st.session_state.last_sync is None
-        or (now - st.session_state.last_sync).seconds > 120
-    ):
-        for sym in ["BTC", "ETH"]:
-            path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
-            sync_from_github(path, path)
-    
-        st.session_state.last_sync = now
-
-    if not expiry:
+    not expiry:
         st.warning("Waiting for first CSV snapshot…")
         st.stop()
 
