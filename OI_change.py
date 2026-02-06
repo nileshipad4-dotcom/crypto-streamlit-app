@@ -288,30 +288,33 @@ def build_delta_table(df_hist, ts1, ts2, use_live, df_live=None):
             m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
 
     out = pd.DataFrame({
-        "Strike": m["strike_price"],
-        "Δ Call OI": m["call_oi_2"] - m["call_oi_1"],
-        "Δ Put OI":  m["put_oi_2"]  - m["put_oi_1"],
-        "Δ Call Vol": m["call_volume_2"] - m["call_volume_1"],
-        "Δ Put Vol":  m["put_volume_2"]  - m["put_volume_1"],
+        "Strike": m["strike_price"].astype(int),
+        "Δ Call OI": (m["call_oi_2"] - m["call_oi_1"]).astype(int),
+        "Δ Put OI":  (m["put_oi_2"]  - m["put_oi_1"]).astype(int),
+        "Δ Call Vol": (m["call_volume_2"] - m["call_volume_1"]).astype(int),
+        "Δ Put Vol":  (m["put_volume_2"]  - m["put_volume_1"]).astype(int),
     })
+
 
     return out.sort_values("Strike").reset_index(drop=True)
 
 def style_delta_table(df, price):
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    # --- highlight strikes around price ---
+    # --- highlight rows surrounding current price ---
     if price:
         below = df[df["Strike"] <= price]
         above = df[df["Strike"] >= price]
 
-        hi = set()
-        if not below.empty:
-            hi.add(below.index[-1])
-        if not above.empty:
-            hi.add(above.index[0])
+        highlight_rows = set()
 
-        for i in hi:
+        if not below.empty:
+            highlight_rows.add(below.index[-1])
+
+        if not above.empty:
+            highlight_rows.add(above.index[0])
+
+        for i in highlight_rows:
             styles.loc[i, :] += "font-weight:bold;"
 
     # --- top 2 absolute values per column ---
@@ -326,6 +329,7 @@ def style_delta_table(df, price):
                 styles.loc[i, col] += "color:orange;font-weight:bold;"
 
     return df.style.apply(lambda _: styles, axis=None)
+
 
 # =========================================================
 # WINDOW ENGINE
