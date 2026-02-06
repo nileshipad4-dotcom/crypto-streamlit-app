@@ -104,11 +104,13 @@ def sync_from_github(repo_path, local_path):
         return
 
     content = base64.b64decode(r.json()["content"]).decode()
+
+    # 🚨 SAFETY: do NOT overwrite non-empty local files
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        return
+
     with open(local_path, "w") as f:
         f.write(content)
-
-
-
 
 # =========================================================
 # LOAD CLEAN OI HISTORY
