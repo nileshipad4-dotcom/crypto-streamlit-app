@@ -795,6 +795,22 @@ c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
     expiry = get_upcoming_expiry()
+    # ---------- SYNC CSVs BEFORE ANY READ ----------
+    if "last_sync" not in st.session_state:
+        st.session_state.last_sync = None
+    
+    now = datetime.utcnow()
+    
+    if (
+        st.session_state.last_sync is None
+        or (now - st.session_state.last_sync).seconds > 120
+    ):
+        for sym in ["BTC", "ETH"]:
+            path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
+            sync_from_github(path, path)
+    
+        st.session_state.last_sync = now
+
     if not expiry:
         st.warning("Waiting for first CSV snapshot…")
         st.stop()
