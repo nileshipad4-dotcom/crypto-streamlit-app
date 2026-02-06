@@ -640,54 +640,74 @@ def highlight_table(df, price):
 def get_ist():
     return (datetime.utcnow()+timedelta(hours=5,minutes=30)).strftime("%H:%M")
 
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_live(symbol, expiry):
+    """
+    Fetch live option chain snapshot from Delta API.
+    Cached for 30s to prevent UI lock / API hammering.
+    """
     url = (
         f"{DELTA_API}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={symbol}"
         f"&expiry_date={expiry}"
     )
-    r = requests.get(url,timeout=15)
-    if r.status_code!=200:
+
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return pd.DataFrame()
+
+        data = r.json().get("result", [])
+        if not data:
+            return pd.DataFrame()
+
+        df = pd.json_normalize(data)
+
+        df = df[[
+            "strike_price", "contract_type",
+            "mark_price", "oi_contracts", "volume",
+            "greeks.gamma", "greeks.delta", "greeks.vega"
+        ]]
+
+        df.rename(columns={
+            "greeks.gamma": "gamma",
+            "greeks.delta": "delta",
+            "greeks.vega": "vega"
+        }, inplace=True)
+
+        calls = df[df.contract_type == "call_options"].copy()
+        puts  = df[df.contract_type == "put_options"].copy()
+
+        calls = calls.rename(columns={
+            "mark_price": "call_mark",
+            "oi_contracts": "call_oi",
+            "volume": "call_volume",
+            "gamma": "call_gamma",
+            "delta": "call_delta",
+            "vega": "call_vega"
+        }).drop(columns=["contract_type"])
+
+        puts = puts.rename(columns={
+            "mark_price": "put_mark",
+            "oi_contracts": "put_oi",
+            "volume": "put_volume",
+            "gamma": "put_gamma",
+            "delta": "put_delta",
+            "vega": "put_vega"
+        }).drop(columns=["contract_type"])
+
+        m = pd.merge(calls, puts, on="strike_price", how="outer")
+
+        m["Expiry"] = expiry
+        m["timestamp_IST"] = get_ist()
+        m["max_pain"] = 0
+
+        return m.reindex(columns=CANONICAL_COLS)
+
+    except Exception:
+        # 🔑 Never crash Streamlit for LIVE data
         return pd.DataFrame()
-
-    df = pd.json_normalize(r.json().get("result",[]))
-    if df.empty:
-        return df
-
-    df = df[[
-        "strike_price","contract_type",
-        "mark_price","oi_contracts","volume",
-        "greeks.gamma","greeks.delta","greeks.vega"
-    ]]
-
-    df.rename(columns={
-        "greeks.gamma":"gamma",
-        "greeks.delta":"delta",
-        "greeks.vega":"vega"
-    }, inplace=True)
-
-    calls = df[df.contract_type=="call_options"].copy()
-    puts  = df[df.contract_type=="put_options"].copy()
-
-    calls = calls.rename(columns={
-        "mark_price":"call_mark","oi_contracts":"call_oi",
-        "volume":"call_volume","gamma":"call_gamma",
-        "delta":"call_delta","vega":"call_vega"
-    }).drop(columns=["contract_type"])
-
-    puts = puts.rename(columns={
-        "mark_price":"put_mark","oi_contracts":"put_oi",
-        "volume":"put_volume","gamma":"put_gamma",
-        "delta":"put_delta","vega":"put_vega"
-    }).drop(columns=["contract_type"])
-
-    m = pd.merge(calls,puts,on="strike_price",how="outer")
-    m["Expiry"]=expiry
-    m["timestamp_IST"]=get_ist()
-    m["max_pain"]=0
-
-    return m.reindex(columns=CANONICAL_COLS)
 
 def get_ist_now():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
@@ -745,6 +765,10 @@ c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
     expiry = get_upcoming_expiry()
+    if not expiry:
+        st.warning("Waiting for first CSV snapshot…")
+        st.stop()
+
 
     if not expiry:
         st.error("No upcoming expiry found")
@@ -876,12 +900,21 @@ st.header("📊 CSV vs LIVE (Delta API)")
 
 df_hist_btc = load_data("BTC", expiry)
 
+if df_hist_btc.empty:
+    st.info("CSV data not available yet.")
+    st.stop()
+
 csv_times = (
     df_hist_btc["timestamp_IST"]
     .drop_duplicates()
     .sort_values(ascending=False)
     .tolist()
 )
+
+if not csv_times:
+    st.info("No valid CSV timestamps yet.")
+    st.stop()
+
 
 selected_ts = st.selectbox(
     "Select CSV Time",
@@ -930,9 +963,21 @@ bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
 # ---------- SYNC LATEST CSV FROM GITHUB ----------
-for sym in ["BTC", "ETH"]:
-    path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
-    sync_from_github(path, path)
+if "last_sync" not in st.session_state:
+    st.session_state.last_sync = None
+
+now = datetime.utcnow()
+
+if (
+    st.session_state.last_sync is None
+    or (now - st.session_state.last_sync).seconds > 120
+):
+    for sym in ["BTC", "ETH"]:
+        path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
+        sync_from_github(path, path)
+
+    st.session_state.last_sync = now
+
 
 
 latest_btc = get_latest_csv_time("BTC", expiry)
