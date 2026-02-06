@@ -152,6 +152,28 @@ def load_data(symbol, expiry):
     return df
 
 
+def get_all_expiries():
+    expiries = set()
+
+    if not os.path.exists(RAW_DIR):
+        return []
+
+    for f in os.listdir(RAW_DIR):
+        if f.endswith("_snapshots.csv"):
+            try:
+                expiry = f.split("_")[1]
+                datetime.strptime(expiry, "%d-%m-%Y")
+                expiries.add(expiry)
+            except Exception:
+                pass
+
+    return sorted(
+        expiries,
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y"),
+        reverse=True
+    )
+
+
 def get_latest_csv_time(symbol, expiry):
     """
     Returns the true latest timestamp from CSV,
@@ -842,13 +864,20 @@ c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
-    expiry = get_upcoming_expiry()
+    expiries = get_all_expiries()
 
-    if not expiry:
-        st.error("No upcoming expiry found")
+    if not expiries:
+        st.error("No CSV expiries found in data/raw")
         st.stop()
 
+    expiry = st.selectbox(
+        "Select Expiry",
+        expiries,
+        index=0  # latest CSV expiry by default
+    )
+
     st.caption(f"📅 Using expiry: **{expiry}**")
+
 
 # ---------- SYNC LATEST CSV FROM GITHUB ----------
 for sym in ["BTC", "ETH"]:
