@@ -166,6 +166,20 @@ def get_latest_csv_time(symbol, expiry):
     except Exception:
         return "—"
 
+def get_csv_times(df):
+    """
+    Returns CSV timestamps sorted by actual datetime (descending),
+    handles midnight rollover correctly.
+    """
+    times = (
+        df[["timestamp_IST"]]
+        .drop_duplicates()
+        .sort_values("timestamp_IST", ascending=False)
+        ["timestamp_IST"]
+        .tolist()
+    )
+    return times
+
 
 def fetch_live_option_chain_totals(symbol, expiry):
     """
@@ -236,6 +250,82 @@ def fetch_live_option_chain_totals(symbol, expiry):
         .sort_values("Strike")
         .reset_index(drop=True)
     )
+
+
+def build_delta_table(df_hist, ts1, ts2, use_live, df_live=None):
+    """
+    Returns strike-wise delta OI & Volume table.
+    """
+    d1 = df_hist[df_hist["timestamp_IST"] == ts1]
+    if d1.empty:
+        return pd.DataFrame()
+
+    if use_live:
+        if df_live is None or df_live.empty:
+            return pd.DataFrame()
+        d2 = df_live.copy()
+    else:
+        d2 = df_hist[df_hist["timestamp_IST"] == ts2]
+        if d2.empty:
+            return pd.DataFrame()
+
+    # align
+    d1 = d1.copy()
+    d2 = d2.copy()
+    d1["strike_price"] = d1["strike_price"].astype(int)
+    d2["strike_price"] = d2["strike_price"].astype(int)
+
+    m = pd.merge(
+        d1, d2, on="strike_price", suffixes=("_1", "_2")
+    )
+
+    if m.empty:
+        return pd.DataFrame()
+
+    for c in ["call_oi_1","call_oi_2","put_oi_1","put_oi_2",
+              "call_volume_1","call_volume_2","put_volume_1","put_volume_2"]:
+        if c in m.columns:
+            m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
+
+    out = pd.DataFrame({
+        "Strike": m["strike_price"],
+        "Δ Call OI": m["call_oi_2"] - m["call_oi_1"],
+        "Δ Put OI":  m["put_oi_2"]  - m["put_oi_1"],
+        "Δ Call Vol": m["call_volume_2"] - m["call_volume_1"],
+        "Δ Put Vol":  m["put_volume_2"]  - m["put_volume_1"],
+    })
+
+    return out.sort_values("Strike").reset_index(drop=True)
+
+def style_delta_table(df, price):
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+
+    # --- highlight strikes around price ---
+    if price:
+        below = df[df["Strike"] <= price]
+        above = df[df["Strike"] >= price]
+
+        hi = set()
+        if not below.empty:
+            hi.add(below.index[-1])
+        if not above.empty:
+            hi.add(above.index[0])
+
+        for i in hi:
+            styles.loc[i, :] += "font-weight:bold;"
+
+    # --- top 2 absolute values per column ---
+    for col in df.columns:
+        if col == "Strike":
+            continue
+
+        ranks = df[col].abs().rank(method="first", ascending=False)
+
+        for i in df.index:
+            if ranks.loc[i] in (1, 2):
+                styles.loc[i, col] += "color:orange;font-weight:bold;"
+
+    return df.style.apply(lambda _: styles, axis=None)
 
 # =========================================================
 # WINDOW ENGINE
@@ -851,6 +941,79 @@ for sym in ["BTC", "ETH"]:
         a.markdown(f"**△ CE:** <span style='color:{c(ce)}'>{ce}</span>",unsafe_allow_html=True)
         b.markdown(f"**△ PE:** <span style='color:{c(pe)}'>{pe}</span>",unsafe_allow_html=True)
         c3.markdown(f"**△ (PE − CE):** <span style='color:{c(d)}'>{d}</span>",unsafe_allow_html=True)
+
+
+
+
+
+st.markdown("---")
+st.header("⏱ Strike-wise Delta (CSV / LIVE)")
+
+for sym in ["BTC", "ETH"]:
+    st.subheader(sym)
+
+    df_hist = load_data(sym, expiry)
+    if df_hist.empty:
+        st.info("No CSV data")
+        continue
+
+    csv_times = get_csv_times(df_hist)
+    if len(csv_times) < 1:
+        st.info("Not enough CSV timestamps")
+        continue
+
+    # --- timestamp selectors ---
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        ts1 = st.selectbox(
+            f"{sym} Timestamp 1",
+            csv_times,
+            index=0,
+            format_func=lambda x: x.strftime("%H:%M"),
+            key=f"{sym}_ts1"
+        )
+
+    with col2:
+        ts2 = st.selectbox(
+            f"{sym} Timestamp 2",
+            csv_times,
+            index=min(1, len(csv_times)-1),
+            format_func=lambda x: x.strftime("%H:%M"),
+            key=f"{sym}_ts2"
+        )
+
+    with col3:
+        use_live = st.toggle(
+            "Use LIVE vs TS1",
+            value=True,
+            key=f"{sym}_live_toggle"
+        )
+
+    df_live = fetch_live(sym, expiry) if use_live else None
+
+    delta_df = build_delta_table(
+        df_hist, ts1, ts2, use_live, df_live
+    )
+
+    if delta_df.empty:
+        st.info("No delta data available")
+        continue
+
+    price = btc_p if sym == "BTC" else eth_p
+
+    st.dataframe(
+        style_delta_table(delta_df, price),
+        use_container_width=True,
+        height=420
+    )
+
+
+
+
+
+
+
 
 st.markdown("---")
 st.header("📊 CSV vs LIVE (Delta API)")
