@@ -112,11 +112,29 @@ def sync_from_github(repo_path, local_path):
 # =========================================================
 
 def load_data(symbol, expiry):
-    df = pd.read_csv(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
+    path = f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
+
+    # ---- HARD GUARD ----
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return pd.DataFrame(columns=CANONICAL_COLS)
+
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame(columns=CANONICAL_COLS)
+
+    if df.empty or "timestamp_IST" not in df.columns:
+        return pd.DataFrame(columns=CANONICAL_COLS)
+
     df["_row"] = range(len(df))
 
-    raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
-    base = datetime(2000,1,1)
+    raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
+    raw = raw.dropna()
+
+    if raw.empty:
+        return pd.DataFrame(columns=CANONICAL_COLS)
+
+    base = datetime(2000, 1, 1)
     out, last, day = [], None, 0
 
     for t in raw:
@@ -125,12 +143,14 @@ def load_data(symbol, expiry):
         out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
         last = t
 
+    df = df.loc[raw.index].copy()
     df["timestamp_IST"] = out
-    
-    # 🔑 CRITICAL FIX: remove duplicate strike rows per timestamp
+
+    # remove duplicate strike rows per timestamp
     df = df.drop_duplicates(subset=["timestamp_IST", "strike_price"])
-    
+
     return df
+
 
 def get_latest_csv_time(symbol, expiry):
     """
@@ -830,6 +850,11 @@ with c_exp:
 
     st.caption(f"📅 Using expiry: **{expiry}**")
 
+# ---------- SYNC LATEST CSV FROM GITHUB ----------
+for sym in ["BTC", "ETH"]:
+    path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
+    sync_from_github(path, path)
+
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
@@ -1081,9 +1106,7 @@ bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
 # ---------- SYNC LATEST CSV FROM GITHUB ----------
-for sym in ["BTC", "ETH"]:
-    path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
-    sync_from_github(path, path)
+
 
 
 latest_btc = get_latest_csv_time("BTC", expiry)
