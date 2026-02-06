@@ -112,29 +112,11 @@ def sync_from_github(repo_path, local_path):
 # =========================================================
 
 def load_data(symbol, expiry):
-    path = f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv"
-
-    # 🔑 SAFETY: file missing or zero size
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        return pd.DataFrame()
-
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        # 🔑 SAFETY: corrupted / partial CSV
-        return pd.DataFrame()
-
-    if df.empty or "timestamp_IST" not in df.columns:
-        return pd.DataFrame()
-
+    df = pd.read_csv(f"{RAW_DIR}/{symbol}_{expiry}_snapshots.csv")
     df["_row"] = range(len(df))
 
-    raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M", errors="coerce")
-    raw = raw.dropna()
-    if raw.empty:
-        return pd.DataFrame()
-
-    base = datetime(2000, 1, 1)
+    raw = pd.to_datetime(df["timestamp_IST"], format="%H:%M")
+    base = datetime(2000,1,1)
     out, last, day = [], None, 0
 
     for t in raw:
@@ -143,12 +125,11 @@ def load_data(symbol, expiry):
         out.append(base + timedelta(days=day, hours=t.hour, minutes=t.minute))
         last = t
 
-    df = df.loc[raw.index].copy()
     df["timestamp_IST"] = out
-
-    # 🔑 remove duplicate strike rows per timestamp
+    
+    # 🔑 CRITICAL FIX: remove duplicate strike rows per timestamp
     df = df.drop_duplicates(subset=["timestamp_IST", "strike_price"])
-
+    
     return df
 
 def get_latest_csv_time(symbol, expiry):
@@ -294,15 +275,9 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
 
     # ignore extreme strikes (same logic as build_row)
     strikes = sorted(m["strike_price"].unique())
-
-
-    # 🔑 Adaptive strike trimming (works for BTC & ETH)
-    strikes = sorted(m["strike_price"].unique())
-    
-    if len(strikes) > 6:
-        m = m[m["strike_price"].isin(strikes[2:-2])]
-    # else: keep all strikes (BTC-safe)
-
+    if len(strikes) <= 4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
     # 🔑 FIX: force numeric OI columns
     for c in ["call_oi_1", "call_oi_2", "put_oi_1", "put_oi_2"]:
         m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
@@ -337,28 +312,24 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
 
     sum_ce = int(agg["CE"].sum() / 100)
     sum_pe = int(agg["PE"].sum() / 100)
-    
+
     return {
         "TIME": f"{last_time:%H:%M} → LIVE",
-        "MAX CE 1": f"{int(ce1.strike_price)}:- {int(ce1.CE)}",
-        "MAX CE 2": f"{int(ce2.strike_price)}:- {int(ce2.CE)}",
+        "MAX CE 1": f"{int(ce.iloc[0].strike_price)}:- {int(ce.iloc[0].CE)}",
+        "MAX CE 2": f"{int(ce.iloc[1].strike_price)}:- {int(ce.iloc[1].CE)}",
         "Σ ΔCE OI": sum_ce,
-        "MAX PE 1": f"{int(pe1.strike_price)}:- {int(pe1.PE)}",
-        "MAX PE 2": f"{int(pe2.strike_price)}:- {int(pe2.PE)}",
+        "MAX PE 1": f"{int(pe.iloc[0].strike_price)}:- {int(pe.iloc[0].PE)}",
+        "MAX PE 2": f"{int(pe.iloc[1].strike_price)}:- {int(pe.iloc[1].PE)}",
         "Σ ΔPE OI": sum_pe,
         "Δ (PE − CE)": sum_pe - sum_ce,
-        "_ce1": ce1.CE,
-        "_ce2": ce2.CE,
-        "_pe1": pe1.PE,
-        "_pe2": pe2.PE,
+        "_ce1": ce.iloc[0].CE,
+        "_ce2": ce.iloc[1].CE,
+        "_pe1": pe.iloc[0].PE,
+        "_pe2": pe.iloc[1].PE,
     }
 
 
 def build_all_windows(df, gap):
-    # 🔑 SAFETY: empty or missing _row
-    if df.empty or "_row" not in df.columns:
-        return []
-
     times = (
         df.sort_values("_row")
           .drop_duplicates("timestamp_IST")["timestamp_IST"]
@@ -366,19 +337,14 @@ def build_all_windows(df, gap):
     )
 
     windows, i = [], 0
-    while i < len(times) - 1:
+    while i < len(times)-1:
         t1 = times[i]
-        t2 = next(
-            (t for t in times[i + 1:] if t >= t1 + timedelta(minutes=gap)),
-            None
-        )
+        t2 = next((t for t in times[i+1:] if t >= t1 + timedelta(minutes=gap)), None)
         if not t2:
             break
-        windows.append((t1, t2))
+        windows.append((t1,t2))
         i = times.index(t2)
-
     return windows
-
 
 
 def build_row(df, t1, t2, live=False):
@@ -389,13 +355,9 @@ def build_row(df, t1, t2, live=False):
 
     m = pd.merge(d1,d2,on="strike_price",suffixes=("_1","_2"))
     strikes = sorted(m["strike_price"].unique())
-    # 🔑 Adaptive strike trimming (works for BTC & ETH)
-    strikes = sorted(m["strike_price"].unique())
-    
-    if len(strikes) > 6:
-        m = m[m["strike_price"].isin(strikes[2:-2])]
-    # else: keep all strikes (BTC-safe)
-
+    if len(strikes)<=4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
 
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
@@ -434,9 +396,6 @@ def build_row(df, t1, t2, live=False):
 
 
 def process_windows(df, gap):
-    if df.empty or "_row" not in df.columns:
-        return pd.DataFrame()
-
     rows = []
     windows = build_all_windows(df, gap)
 
@@ -476,17 +435,9 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
             m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
 
     strikes = sorted(m["strike_price"].unique())
-    # 🔑 Adaptive strike trimming (works for BTC & ETH)
-    strikes = sorted(m["strike_price"].unique())
-    
-    # 🔑 Adaptive strike trimming (works for BTC & ETH)
-    strikes = sorted(m["strike_price"].unique())
-    
-    if len(strikes) > 6:
-        m = m[m["strike_price"].isin(strikes[2:-2])]
-    # else: keep all strikes (BTC-safe)
-
-
+    if len(strikes) <= 4:
+        return None
+    m = m[m["strike_price"].isin(strikes[2:-2])]
 
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
@@ -499,7 +450,7 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
     ce = agg.sort_values("CE", ascending=False)
     pe = agg.sort_values("PE", ascending=False)
 
-    if len(ce) < 1 or len(pe) < 1:
+    if len(ce) < 2 or len(pe) < 2:
         return None
 
     sum_ce = int(agg["CE"].sum() / 100)
@@ -670,74 +621,54 @@ def highlight_table(df, price):
 def get_ist():
     return (datetime.utcnow()+timedelta(hours=5,minutes=30)).strftime("%H:%M")
 
-@st.cache_data(ttl=30, show_spinner=False)
 def fetch_live(symbol, expiry):
-    """
-    Fetch live option chain snapshot from Delta API.
-    Cached for 30s to prevent UI lock / API hammering.
-    """
     url = (
         f"{DELTA_API}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={symbol}"
         f"&expiry_date={expiry}"
     )
-
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200:
-            return pd.DataFrame()
-
-        data = r.json().get("result", [])
-        if not data:
-            return pd.DataFrame()
-
-        df = pd.json_normalize(data)
-
-        df = df[[
-            "strike_price", "contract_type",
-            "mark_price", "oi_contracts", "volume",
-            "greeks.gamma", "greeks.delta", "greeks.vega"
-        ]]
-
-        df.rename(columns={
-            "greeks.gamma": "gamma",
-            "greeks.delta": "delta",
-            "greeks.vega": "vega"
-        }, inplace=True)
-
-        calls = df[df.contract_type == "call_options"].copy()
-        puts  = df[df.contract_type == "put_options"].copy()
-
-        calls = calls.rename(columns={
-            "mark_price": "call_mark",
-            "oi_contracts": "call_oi",
-            "volume": "call_volume",
-            "gamma": "call_gamma",
-            "delta": "call_delta",
-            "vega": "call_vega"
-        }).drop(columns=["contract_type"])
-
-        puts = puts.rename(columns={
-            "mark_price": "put_mark",
-            "oi_contracts": "put_oi",
-            "volume": "put_volume",
-            "gamma": "put_gamma",
-            "delta": "put_delta",
-            "vega": "put_vega"
-        }).drop(columns=["contract_type"])
-
-        m = pd.merge(calls, puts, on="strike_price", how="outer")
-
-        m["Expiry"] = expiry
-        m["timestamp_IST"] = get_ist()
-        m["max_pain"] = 0
-
-        return m.reindex(columns=CANONICAL_COLS)
-
-    except Exception:
-        # 🔑 Never crash Streamlit for LIVE data
+    r = requests.get(url,timeout=15)
+    if r.status_code!=200:
         return pd.DataFrame()
+
+    df = pd.json_normalize(r.json().get("result",[]))
+    if df.empty:
+        return df
+
+    df = df[[
+        "strike_price","contract_type",
+        "mark_price","oi_contracts","volume",
+        "greeks.gamma","greeks.delta","greeks.vega"
+    ]]
+
+    df.rename(columns={
+        "greeks.gamma":"gamma",
+        "greeks.delta":"delta",
+        "greeks.vega":"vega"
+    }, inplace=True)
+
+    calls = df[df.contract_type=="call_options"].copy()
+    puts  = df[df.contract_type=="put_options"].copy()
+
+    calls = calls.rename(columns={
+        "mark_price":"call_mark","oi_contracts":"call_oi",
+        "volume":"call_volume","gamma":"call_gamma",
+        "delta":"call_delta","vega":"call_vega"
+    }).drop(columns=["contract_type"])
+
+    puts = puts.rename(columns={
+        "mark_price":"put_mark","oi_contracts":"put_oi",
+        "volume":"put_volume","gamma":"put_gamma",
+        "delta":"put_delta","vega":"put_vega"
+    }).drop(columns=["contract_type"])
+
+    m = pd.merge(calls,puts,on="strike_price",how="outer")
+    m["Expiry"]=expiry
+    m["timestamp_IST"]=get_ist()
+    m["max_pain"]=0
+
+    return m.reindex(columns=CANONICAL_COLS)
 
 def get_ist_now():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
@@ -797,30 +728,13 @@ with c_exp:
     expiry = get_upcoming_expiry()
 
     if not expiry:
-        st.warning("Waiting for first CSV snapshot…")
+        st.error("No upcoming expiry found")
         st.stop()
-
-    # ---------- SYNC CSVs (ONLY AFTER expiry EXISTS) ----------
-    if "last_sync" not in st.session_state:
-        st.session_state.last_sync = None
-
-    now = datetime.utcnow()
-
-    if (
-        st.session_state.last_sync is None
-        or (now - st.session_state.last_sync).seconds > 120
-    ):
-        for sym in ["BTC", "ETH"]:
-            path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
-            sync_from_github(path, path)
-
-        st.session_state.last_sync = now
 
     st.caption(f"📅 Using expiry: **{expiry}**")
 
-
 with c_gap:
-    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=0)
+    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
 
 
 
@@ -943,21 +857,12 @@ st.header("📊 CSV vs LIVE (Delta API)")
 
 df_hist_btc = load_data("BTC", expiry)
 
-if df_hist_btc.empty:
-    st.info("CSV data not available yet.")
-    st.stop()
-
 csv_times = (
     df_hist_btc["timestamp_IST"]
     .drop_duplicates()
     .sort_values(ascending=False)
     .tolist()
 )
-
-if not csv_times:
-    st.info("No valid CSV timestamps yet.")
-    st.stop()
-
 
 selected_ts = st.selectbox(
     "Select CSV Time",
@@ -1006,21 +911,9 @@ bucket, remaining = get_bucket_and_remaining()
 mm, ss = divmod(remaining, 60)
 
 # ---------- SYNC LATEST CSV FROM GITHUB ----------
-if "last_sync" not in st.session_state:
-    st.session_state.last_sync = None
-
-now = datetime.utcnow()
-
-if (
-    st.session_state.last_sync is None
-    or (now - st.session_state.last_sync).seconds > 120
-):
-    for sym in ["BTC", "ETH"]:
-        path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
-        sync_from_github(path, path)
-
-    st.session_state.last_sync = now
-
+for sym in ["BTC", "ETH"]:
+    path = f"{RAW_DIR}/{sym}_{expiry}_snapshots.csv"
+    sync_from_github(path, path)
 
 
 latest_btc = get_latest_csv_time("BTC", expiry)
