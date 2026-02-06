@@ -1042,74 +1042,6 @@ for sym in ["BTC", "ETH"]:
 
 
 
-st.markdown("---")
-st.header("⏱ Strike-wise Delta (CSV / LIVE)")
-
-for sym in ["BTC", "ETH"]:
-    st.subheader(sym)
-
-    df_hist = load_data(sym, expiry)
-    if df_hist.empty:
-        st.info("No CSV data")
-        continue
-
-    csv_times = get_csv_times(df_hist)
-    if len(csv_times) < 1:
-        st.info("Not enough CSV timestamps")
-        continue
-
-    # --- timestamp selectors ---
-    col1, col2, col3 = st.columns([2, 2, 1])
-
-    with col1:
-        ts1 = st.selectbox(
-            f"{sym} Timestamp 1",
-            csv_times,
-            index=0,
-            format_func=lambda x: x.strftime("%H:%M"),
-            key=f"{sym}_ts1"
-        )
-
-    with col2:
-        ts2 = st.selectbox(
-            f"{sym} Timestamp 2",
-            csv_times,
-            index=min(1, len(csv_times)-1),
-            format_func=lambda x: x.strftime("%H:%M"),
-            key=f"{sym}_ts2"
-        )
-
-    with col3:
-        use_live = st.toggle(
-            "Use LIVE vs TS1",
-            value=True,
-            key=f"{sym}_live_toggle"
-        )
-
-    df_live = fetch_live(sym, expiry) if use_live else None
-
-    delta_df = build_delta_table(
-        df_hist, ts1, ts2, use_live, df_live
-    )
-
-    if delta_df.empty:
-        st.info("No delta data available")
-        continue
-
-    price = btc_p if sym == "BTC" else eth_p
-
-    st.dataframe(
-        style_delta_table(delta_df, price),
-        use_container_width=True,
-        height=420
-    )
-
-
-
-
-
-
-
 
 st.markdown("---")
 st.header("📊 CSV vs LIVE (Delta API)")
@@ -1197,6 +1129,77 @@ with col_c:
             f"⏸ Snapshot push paused  |  "
             f"**Last CSV:** BTC `{latest_btc}` · ETH `{latest_eth}`"
         )
+
+
+
+st.markdown("---")
+st.header("⏱ Strike-wise Delta (CSV / LIVE)")
+
+for sym in ["BTC", "ETH"]:
+    st.subheader(sym)
+
+    df_hist = load_data(sym, expiry)
+    if df_hist.empty:
+        st.info("No CSV data")
+        continue
+
+    csv_times = get_csv_times(df_hist)
+    if len(csv_times) < 1:
+        st.info("Not enough CSV timestamps")
+        continue
+
+    # --- timestamp selectors ---
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        ts1 = st.selectbox(
+            f"{sym} Timestamp 1",
+            csv_times,
+            index=0,
+            format_func=lambda x: x.strftime("%H:%M"),
+            key=f"{sym}_ts1"
+        )
+
+    with col2:
+        ts2 = st.selectbox(
+            f"{sym} Timestamp 2",
+            csv_times,
+            index=min(1, len(csv_times)-1),
+            format_func=lambda x: x.strftime("%H:%M"),
+            key=f"{sym}_ts2"
+        )
+
+    with col3:
+        use_live = st.toggle(
+            "Use LIVE vs TS1",
+            value=True,
+            key=f"{sym}_live_toggle"
+        )
+
+    df_live = fetch_live(sym, expiry) if use_live else None
+
+    delta_df = build_delta_table(
+        df_hist, ts1, ts2, use_live, df_live
+    )
+
+    if delta_df.empty:
+        st.info("No delta data available")
+        continue
+
+    price = btc_p if sym == "BTC" else eth_p
+
+    st.dataframe(
+        style_delta_table(delta_df, price),
+        use_container_width=True,
+        height=420
+    )
+
+
+
+
+
+
+
 
 if (
     st.session_state.push_enabled
