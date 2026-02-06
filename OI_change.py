@@ -429,6 +429,11 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
     if m.empty:
         return None
 
+    # 🔑 FIX: force numeric OI columns
+    for c in ["call_oi_1", "call_oi_2", "put_oi_1", "put_oi_2"]:
+        if c in m.columns:
+            m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
+
     strikes = sorted(m["strike_price"].unique())
     if len(strikes) <= 4:
         return None
@@ -462,6 +467,7 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
         "Δ (PE − CE)": sum_pe - sum_ce,
     }
 
+    
 # =========================================================
 # SIDE TABLE: LARGE OI EXTRACTOR
 # =========================================================
