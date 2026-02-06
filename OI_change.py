@@ -301,7 +301,7 @@ def build_delta_table(df_hist, ts1, ts2, use_live, df_live=None):
 def style_delta_table(df, price):
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
 
-    # --- highlight rows surrounding current price ---
+    # --- highlight rows surrounding current price (BLUE) ---
     if price:
         below = df[df["Strike"] <= price]
         above = df[df["Strike"] >= price]
@@ -315,9 +315,13 @@ def style_delta_table(df, price):
             highlight_rows.add(above.index[0])
 
         for i in highlight_rows:
-            styles.loc[i, :] += "font-weight:bold;"
+            styles.loc[i, :] += (
+                "background-color:#1e90ff;"
+                "color:white;"
+                "font-weight:bold;"
+            )
 
-    # --- top 2 absolute values per column ---
+    # --- top 2 absolute values per column (ORANGE TEXT ONLY) ---
     for col in df.columns:
         if col == "Strike":
             continue
@@ -329,7 +333,6 @@ def style_delta_table(df, price):
                 styles.loc[i, col] += "color:orange;font-weight:bold;"
 
     return df.style.apply(lambda _: styles, axis=None)
-
 
 # =========================================================
 # WINDOW ENGINE
