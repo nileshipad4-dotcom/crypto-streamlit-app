@@ -860,6 +860,26 @@ st.title("BTC & ETH OI Change Scanner")
 btc_p = get_delta_price("BTC")
 eth_p = get_delta_price("ETH")
 
+# =========================================================
+# SIDEBAR — ALWAYS VISIBLE PRICES
+# =========================================================
+with st.sidebar:
+    st.markdown("### 📈 Live Prices")
+
+    st.metric(
+        "BTC",
+        f"{btc_p:,.2f}" if btc_p else "—",
+        delta=None
+    )
+
+    st.metric(
+        "ETH",
+        f"{eth_p:,.2f}" if eth_p else "—",
+        delta=None
+    )
+
+    st.markdown("---")
+
 c1,c2 = st.columns(2)
 c1.metric("BTC Price", f"{btc_p:,.2f}" if btc_p else "—")
 c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
