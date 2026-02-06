@@ -795,16 +795,13 @@ c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
     expiry = get_upcoming_expiry()
-    not expiry:
+
+    if not expiry:
         st.warning("Waiting for first CSV snapshot…")
         st.stop()
 
-
-    if not expiry:
-        st.error("No upcoming expiry found")
-        st.stop()
-
     st.caption(f"📅 Using expiry: **{expiry}**")
+
 
 with c_gap:
     gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=0)
