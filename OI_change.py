@@ -789,7 +789,7 @@ with c_exp:
     st.caption(f"📅 Using expiry: **{expiry}**")
 
 with c_gap:
-    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=2)
+    gap = st.selectbox("Min Gap (minutes)", [5,10,15,20,30,45,60], index=0)
 
 
 
