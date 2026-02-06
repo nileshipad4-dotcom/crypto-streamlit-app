@@ -897,6 +897,30 @@ for sym in ["BTC", "ETH"]:
     
     df_hist = load_data(sym, expiry)
     df = process_windows(df_hist, gap)
+
+    # ---- DEFAULT CSV TIME FROM LAST MAIN TABLE ROW ----
+    default_csv_ts = None
+    
+    if not df.empty:
+        last_time_label = df.iloc[-1]["TIME"]
+    
+        # Handles:
+        # "13:22 - 13:54"
+        # "13:54 → LIVE"
+        try:
+            if "-" in last_time_label:
+                default_csv_ts = last_time_label.split("-")[-1].strip()
+            elif "→" in last_time_label:
+                default_csv_ts = last_time_label.split("→")[0].strip()
+        except Exception:
+            default_csv_ts = None
+    
+    if default_csv_ts:
+        try:
+            default_csv_ts = datetime.strptime(default_csv_ts, "%H:%M").time()
+        except Exception:
+            default_csv_ts = None
+
     
     # ---------- ADD LIVE ROW ----------
     if not df.empty:
@@ -931,6 +955,44 @@ for sym in ["BTC", "ETH"]:
             highlight_table(df, price),
             use_container_width=True
         )
+
+
+# =========================================================
+# 📊 CSV vs LIVE (Delta API)
+# =========================================================
+st.markdown("**📊 CSV vs LIVE (Delta API)**")
+
+csv_times = (
+    df_hist["timestamp_IST"]
+    .drop_duplicates()
+    .sort_values(ascending=False)
+    .tolist()
+)
+
+default_idx = 0
+if default_csv_ts:
+    for i, t in enumerate(csv_times):
+        if t.time() == default_csv_ts:
+            default_idx = i
+            break
+
+selected_ts = st.selectbox(
+    f"{sym} CSV Time",
+    csv_times,
+    index=default_idx,
+    format_func=lambda x: x.strftime("%H:%M"),
+    key=f"{sym}_csv_live_ts"
+)
+
+df_live = fetch_live(sym, expiry)
+
+row = build_csv_vs_live_row(df_hist, df_live, selected_ts)
+
+if row:
+    out = pd.DataFrame([row]).set_index(pd.Index([sym], name="SYMBOL"))
+    st.dataframe(out, use_container_width=True, height=120)
+else:
+    st.info("No LIVE data available")
 
 
     # ---------------- SIDE TABLE ----------------
@@ -1076,47 +1138,7 @@ for sym in ["BTC", "ETH"]:
 
 
 
-st.markdown("---")
-st.header("📊 CSV vs LIVE (Delta API)")
-
-df_hist_btc = load_data("BTC", expiry)
-
-csv_times = (
-    df_hist_btc["timestamp_IST"]
-    .drop_duplicates()
-    .sort_values(ascending=False)
-    .tolist()
-)
-
-selected_ts = st.selectbox(
-    "Select CSV Time",
-    csv_times,
-    format_func=lambda x: x.strftime("%H:%M")
-)
-
-rows = []
-
-for sym in ["BTC", "ETH"]:
-    df_hist = load_data(sym, expiry)
-
-    # LIVE DATA FROM DELTA API
-    df_live = fetch_live(sym, expiry)
-
-    r = build_csv_vs_live_row(df_hist, df_live, selected_ts)
-    if r:
-        r["SYMBOL"] = sym
-        rows.append(r)
-
-if rows:
-    out = pd.DataFrame(rows).set_index("SYMBOL")
-
-    st.dataframe(
-        out,
-        use_container_width=True,
-        height=140
-    )
-else:
-    st.info("No LIVE data available from Delta API")
+info("No LIVE data available from Delta API")
 
 
 # =========================================================
