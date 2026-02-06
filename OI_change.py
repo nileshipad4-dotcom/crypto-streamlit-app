@@ -1121,24 +1121,3 @@ if (
 
 
 
-# =========================================================
-# LIVE OPTION CHAIN (TOTAL OI & VOLUME)
-# =========================================================
-
-st.markdown("---")
-st.header("📡 Live Option Chain (Totals)")
-
-for sym in ["BTC", "ETH"]:
-    st.subheader(f"{sym} Option Chain")
-
-    live_df = fetch_live_option_chain_totals(sym, expiry)
-
-    if live_df.empty:
-        st.info("No live option chain data available")
-        continue
-
-    st.dataframe(
-        live_df,
-        use_container_width=True,
-        height=420
-    )
