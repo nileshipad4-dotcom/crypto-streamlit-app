@@ -294,9 +294,15 @@ def build_live_row_from_last_snapshot(df_hist, df_live, last_time):
 
     # ignore extreme strikes (same logic as build_row)
     strikes = sorted(m["strike_price"].unique())
-    if len(strikes) <= 4:
-        return None
-    m = m[m["strike_price"].isin(strikes[2:-2])]
+
+
+    # 🔑 Adaptive strike trimming (works for BTC & ETH)
+    strikes = sorted(m["strike_price"].unique())
+    
+    if len(strikes) > 6:
+        m = m[m["strike_price"].isin(strikes[2:-2])]
+    # else: keep all strikes (BTC-safe)
+
     # 🔑 FIX: force numeric OI columns
     for c in ["call_oi_1", "call_oi_2", "put_oi_1", "put_oi_2"]:
         m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
@@ -383,9 +389,13 @@ def build_row(df, t1, t2, live=False):
 
     m = pd.merge(d1,d2,on="strike_price",suffixes=("_1","_2"))
     strikes = sorted(m["strike_price"].unique())
-    if len(strikes)<=4:
-        return None
-    m = m[m["strike_price"].isin(strikes[2:-2])]
+    # 🔑 Adaptive strike trimming (works for BTC & ETH)
+    strikes = sorted(m["strike_price"].unique())
+    
+    if len(strikes) > 6:
+        m = m[m["strike_price"].isin(strikes[2:-2])]
+    # else: keep all strikes (BTC-safe)
+
 
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
@@ -466,9 +476,17 @@ def build_csv_vs_live_row(df_hist, df_live, ts):
             m[c] = pd.to_numeric(m[c], errors="coerce").fillna(0)
 
     strikes = sorted(m["strike_price"].unique())
-    if len(strikes) <= 4:
-        return None
-    m = m[m["strike_price"].isin(strikes[2:-2])]
+    # 🔑 Adaptive strike trimming (works for BTC & ETH)
+    strikes = sorted(m["strike_price"].unique())
+    
+    # 🔑 Adaptive strike trimming (works for BTC & ETH)
+    strikes = sorted(m["strike_price"].unique())
+    
+    if len(strikes) > 6:
+        m = m[m["strike_price"].isin(strikes[2:-2])]
+    # else: keep all strikes (BTC-safe)
+
+
 
     m["CE"] = m["call_oi_2"] - m["call_oi_1"]
     m["PE"] = m["put_oi_2"] - m["put_oi_1"]
