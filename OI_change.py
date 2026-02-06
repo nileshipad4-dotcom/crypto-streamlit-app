@@ -107,9 +107,6 @@ def sync_from_github(repo_path, local_path):
 
 
 
-    idx = expiries.index(selected_expiry)
-    return expiries[idx : idx + count]
-
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
