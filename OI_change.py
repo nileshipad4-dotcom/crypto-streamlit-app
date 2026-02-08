@@ -95,6 +95,7 @@ def get_upcoming_expiry():
     return min(expiries).strftime("%d-%m-%Y")
 
 
+
 def sync_from_github(repo_path, local_path):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{repo_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
@@ -104,13 +105,38 @@ def sync_from_github(repo_path, local_path):
         return
 
     content = base64.b64decode(r.json()["content"]).decode()
-
-    # 🚨 SAFETY: do NOT overwrite non-empty local files
-    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+    if not content.strip():
         return
 
-    with open(local_path, "w") as f:
-        f.write(content)
+    github_df = pd.read_csv(StringIO(content))
+
+    # If local file does not exist → write full file
+    if not os.path.exists(local_path):
+        github_df.to_csv(local_path, index=False)
+        return
+
+    local_df = pd.read_csv(local_path)
+
+    # Append only NEW rows
+    key_cols = ["timestamp_IST", "strike_price"]
+    merged = github_df.merge(
+        local_df[key_cols],
+        on=key_cols,
+        how="left",
+        indicator=True
+    )
+
+    new_rows = merged[merged["_merge"] == "left_only"].drop(columns="_merge")
+
+    if new_rows.empty:
+        return
+
+    new_rows.to_csv(
+        local_path,
+        mode="a",
+        header=False,
+        index=False
+    )
 
 # =========================================================
 # LOAD CLEAN OI HISTORY
