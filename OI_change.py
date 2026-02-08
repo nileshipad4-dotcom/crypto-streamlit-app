@@ -878,35 +878,42 @@ def get_bucket_and_remaining():
     return bucket_id, seconds_remaining
 
 
-def append_raw(path, df):
+def append_raw(path, df, retries=3):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
 
-    # 1️⃣ Get latest file + SHA
-    r = requests.get(url, headers=headers)
-    sha, old = None, ""
+    for attempt in range(retries):
+        r = requests.get(url, headers=headers)
+        sha, old = None, ""
 
-    if r.status_code == 200:
-        sha = r.json()["sha"]
-        old = base64.b64decode(r.json()["content"]).decode()
+        if r.status_code == 200:
+            sha = r.json()["sha"]
+            old = base64.b64decode(r.json()["content"]).decode()
 
-    # 2️⃣ Append CSV rows
-    new = df.to_csv(index=False, header=(old == ""))
-    payload = {
-        "message": "raw snapshot",
-        "content": base64.b64encode((old + new).encode()).decode(),
-        "branch": GITHUB_BRANCH
-    }
-    if sha:
-        payload["sha"] = sha
+        new = df.to_csv(index=False, header=(old == ""))
+        payload = {
+            "message": "raw snapshot",
+            "content": base64.b64encode((old + new).encode()).decode(),
+            "branch": GITHUB_BRANCH
+        }
+        if sha:
+            payload["sha"] = sha
 
-    # 3️⃣ PUSH + CHECK RESPONSE
-    resp = requests.put(url, headers=headers, json=payload)
+        resp = requests.put(url, headers=headers, json=payload)
 
-    if resp.status_code not in (200, 201):
-        raise RuntimeError(
-            f"GitHub push failed {resp.status_code}: {resp.text}"
-        )
+        if resp.status_code in (200, 201):
+            return  # ✅ success
+
+        if resp.status_code != 409:
+            raise RuntimeError(
+                f"GitHub push failed {resp.status_code}: {resp.text}"
+            )
+
+        # 🔁 SHA conflict → retry
+        time.sleep(1)
+
+    raise RuntimeError("GitHub push failed after retries (SHA conflict)")
+
 
 # =========================================================
 # UI
