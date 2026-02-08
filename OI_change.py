@@ -6,6 +6,7 @@ import os
 import base64
 from io import StringIO
 from streamlit_autorefresh import st_autorefresh
+import time
 
 # =========================================================
 # CONFIG
