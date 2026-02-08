@@ -906,9 +906,10 @@ def append_raw(path, df, retries=3):
             return  # ✅ success
 
         if resp.status_code != 409:
-            raise RuntimeError(
-                f"GitHub push failed {resp.status_code}: {resp.text}"
-            )
+            st.error(f"❌ GitHub push failed: {resp.status_code}")
+            st.code(resp.text)
+            st.stop()
+
 
         # 🔁 SHA conflict → retry
         time.sleep(1)
