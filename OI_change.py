@@ -880,22 +880,33 @@ def get_bucket_and_remaining():
 
 def append_raw(path, df):
     url = f"{GITHUB_API}/repos/{CRYPTO_REPO}/contents/{path}"
-    headers={"Authorization":f"token {GITHUB_TOKEN}"}
-    r=requests.get(url,headers=headers)
-    sha,old=None,""
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
 
-    if r.status_code==200:
-        sha=r.json()["sha"]
-        old=base64.b64decode(r.json()["content"]).decode()
+    # 1️⃣ Get latest file + SHA
+    r = requests.get(url, headers=headers)
+    sha, old = None, ""
 
-    new=df.to_csv(index=False,header=not bool(old))
-    payload={
-        "message":"raw snapshot",
-        "content":base64.b64encode((old+new).encode()).decode(),
-        "branch":GITHUB_BRANCH
+    if r.status_code == 200:
+        sha = r.json()["sha"]
+        old = base64.b64decode(r.json()["content"]).decode()
+
+    # 2️⃣ Append CSV rows
+    new = df.to_csv(index=False, header=(old == ""))
+    payload = {
+        "message": "raw snapshot",
+        "content": base64.b64encode((old + new).encode()).decode(),
+        "branch": GITHUB_BRANCH
     }
-    if sha: payload["sha"]=sha
-    requests.put(url,headers=headers,json=payload)
+    if sha:
+        payload["sha"] = sha
+
+    # 3️⃣ PUSH + CHECK RESPONSE
+    resp = requests.put(url, headers=headers, json=payload)
+
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(
+            f"GitHub push failed {resp.status_code}: {resp.text}"
+        )
 
 # =========================================================
 # UI
@@ -1262,4 +1273,5 @@ if (
             )
 
     st.session_state.last_push_bucket = bucket
-    st.success("Raw snapshots appended successfully.")
+    st.success("Raw snapshots appended successfully (GitHub confirmed).")
+
