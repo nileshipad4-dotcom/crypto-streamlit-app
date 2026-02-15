@@ -183,7 +183,16 @@ def main():
     os.makedirs("data/raw", exist_ok=True)
 
     expiries = get_expiries()
-    selected_expiry = expiries[0]   # Nearest valid expiry
+
+    # Convert string to date
+    nearest_expiry_date = datetime.strptime(expiries[0], "%d-%m-%Y").date()
+    
+    # Add 1 day
+    next_day_expiry = nearest_expiry_date + timedelta(days=1)
+    
+    # Convert back to string
+    selected_expiry = next_day_expiry.strftime("%d-%m-%Y")
+
 
     print(f"Using Expiry: {selected_expiry}")
 
@@ -218,6 +227,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
