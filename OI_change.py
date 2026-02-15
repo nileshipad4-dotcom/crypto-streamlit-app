@@ -165,6 +165,30 @@ def format_for_delta(expiry_ddmmyyyy):
     dt = datetime.strptime(expiry_ddmmyyyy, "%d-%m-%Y")
     return dt.strftime("%Y-%m-%d")
 
+# -------------------------------------------------
+# MAX PAIN (Same as collector.py)
+# -------------------------------------------------
+def compute_max_pain(df):
+
+    A = df["call_mark"].fillna(0).values
+    B = df["call_oi"].fillna(0).values
+    G = df["strike_price"].fillna(0).values
+    L = df["put_oi"].fillna(0).values
+    M = df["put_mark"].fillna(0).values
+
+    n = len(df)
+    U = []
+
+    for i in range(n):
+        q = -sum(A[i:] * B[i:])
+        r = G[i] * sum(B[:i]) - sum(G[:i] * B[:i])
+        s = -sum(M[:i] * L[:i])
+        t = sum(G[i:] * L[i:]) - G[i] * sum(L[i:])
+        U.append(round((q + r + s + t) / 10000))
+
+    df["max_pain"] = U
+    return df
+
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
@@ -881,7 +905,8 @@ def fetch_live(symbol, expiry):
     m = pd.merge(calls,puts,on="strike_price",how="outer")
     m["Expiry"]=expiry
     m["timestamp_IST"]=get_ist()
-    m["max_pain"]=0
+    m = compute_max_pain(m)
+
 
     return m.reindex(columns=CANONICAL_COLS)
 
