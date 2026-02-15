@@ -139,6 +139,32 @@ def sync_from_github(repo_path, local_path):
         index=False
     )
 
+
+def get_target_expiry_plus_one():
+    """
+    Returns (current expiry + 1 day) in DD-MM-YYYY format.
+    Current expiry assumed as nearest future expiry from RAW_DIR.
+    """
+    expiries = get_all_expiries()
+    if not expiries:
+        return None
+
+    # nearest expiry (latest in sorted descending list)
+    nearest = min(
+        expiries,
+        key=lambda x: datetime.strptime(x, "%d-%m-%Y")
+    )
+
+    dt = datetime.strptime(nearest, "%d-%m-%Y") + timedelta(days=1)
+    return dt.strftime("%d-%m-%Y")
+
+def format_for_delta(expiry_ddmmyyyy):
+    """
+    Converts DD-MM-YYYY → YYYY-MM-DD for Delta API
+    """
+    dt = datetime.strptime(expiry_ddmmyyyy, "%d-%m-%Y")
+    return dt.strftime("%Y-%m-%d")
+
 # =========================================================
 # LOAD CLEAN OI HISTORY
 # =========================================================
@@ -264,7 +290,7 @@ def fetch_live_option_chain_totals(symbol, expiry):
         f"{DELTA_API}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={symbol}"
-        f"&expiry_date={expiry}"
+        f"&expiry_date={format_for_delta(expiry)}"
     )
 
     r = requests.get(url, timeout=15)
@@ -815,7 +841,7 @@ def fetch_live(symbol, expiry):
         f"{DELTA_API}"
         f"?contract_types=call_options,put_options"
         f"&underlying_asset_symbols={symbol}"
-        f"&expiry_date={expiry}"
+        f"&expiry_date={format_for_delta(expiry)}"
     )
     r = requests.get(url,timeout=15)
     if r.status_code!=200:
@@ -953,19 +979,14 @@ c2.metric("ETH Price", f"{eth_p:,.2f}" if eth_p else "—")
 c_exp, c_gap, c_thr = st.columns([2,1,1])
 
 with c_exp:
-    expiries = get_all_expiries()
+    expiry = get_target_expiry_plus_one()
 
-    if not expiries:
-        st.error("No CSV expiries found in data/raw")
+    if not expiry:
+        st.error("No base expiry found in data/raw")
         st.stop()
 
-    expiry = st.selectbox(
-        "Select Expiry",
-        expiries,
-        index=0  # latest CSV expiry by default
-    )
+    st.caption(f"📅 Using expiry (Current +1): **{expiry}**")
 
-    st.caption(f"📅 Using expiry: **{expiry}**")
 
 
 # ---------- SYNC LATEST CSV FROM GITHUB ----------
